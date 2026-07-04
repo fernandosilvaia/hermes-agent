@@ -267,3 +267,283 @@ code { font-size: 0.875rem; }
   display: none;
 }
 
+.hermes-analytics-command {
+  position: relative;
+  display: grid;
+  gap: calc(1rem * var(--theme-spacing-mul, 1));
+  padding: calc(1.25rem * var(--theme-spacing-mul, 1));
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--midground-base) 18%, transparent);
+  border-radius: calc(var(--theme-radius) + 18px);
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--warm-glow) 55%, transparent), transparent 34%),
+    linear-gradient(135deg, color-mix(in srgb, var(--midground-base) 9%, var(--background-base)), color-mix(in srgb, var(--background-base) 92%, #000 8%));
+  box-shadow:
+    0 24px 70px color-mix(in srgb, #000 38%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--midground-base) 22%, transparent);
+}
+
+.hermes-analytics-command::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--midground-base) 8%, transparent) 1px, transparent 1px),
+    linear-gradient(0deg, color-mix(in srgb, var(--midground-base) 6%, transparent) 1px, transparent 1px);
+  background-size: 42px 42px;
+  mask-image: linear-gradient(120deg, #000 0%, transparent 62%);
+}
+
+.hermes-analytics-command__copy,
+.hermes-analytics-command__signals {
+  position: relative;
+  z-index: 1;
+}
+
+.hermes-analytics-command__copy span {
+  font-family: var(--theme-font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--midground-base) 74%, transparent);
+}
+
+.hermes-analytics-command__copy h2 {
+  max-width: 760px;
+  margin: 0.45rem 0 0;
+  font-family: var(--theme-font-display);
+  font-size: clamp(1.45rem, 3vw, 2.4rem);
+  line-height: 0.98;
+  color: var(--midground);
+  text-wrap: balance;
+}
+
+.hermes-analytics-command__copy p {
+  max-width: 720px;
+  margin: 0.75rem 0 0;
+  color: color-mix(in srgb, var(--midground-base) 72%, transparent);
+}
+
+.hermes-analytics-command__signals {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.hermes-analytics-command__signals div {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid color-mix(in srgb, var(--midground-base) 14%, transparent);
+  border-radius: calc(var(--theme-radius) + 12px);
+  background: color-mix(in srgb, var(--background-base) 72%, transparent);
+}
+
+.hermes-analytics-command__signals strong {
+  font-family: var(--theme-font-mono);
+  font-size: 1rem;
+  color: var(--midground);
+}
+
+.hermes-analytics-command__signals span {
+  font-family: var(--theme-font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--midground-base) 58%, transparent);
+}
+
+@media (min-width: 900px) {
+  .hermes-analytics-command {
+    grid-template-columns: minmax(0, 1.6fr) minmax(320px, 0.85fr);
+    align-items: end;
+  }
+}
+
+.hermes-model-command {
+  position: relative;
+  display: grid;
+  gap: calc(1rem * var(--theme-spacing-mul, 1));
+  padding: calc(1.2rem * var(--theme-spacing-mul, 1));
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--midground-base) 16%, transparent);
+  border-radius: calc(var(--theme-radius) + 16px);
+  background:
+    radial-gradient(circle at 12% 0%, color-mix(in srgb, var(--series-output-token) 18%, transparent), transparent 34%),
+    radial-gradient(circle at 100% 10%, color-mix(in srgb, var(--series-input-token) 16%, transparent), transparent 32%),
+    color-mix(in srgb, var(--background-base) 88%, #000 12%);
+  box-shadow:
+    0 22px 64px color-mix(in srgb, #000 34%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--midground-base) 18%, transparent);
+}
+
+.hermes-model-command::after {
+  content: '';
+  position: absolute;
+  inset: auto 1.2rem 0;
+  height: 1px;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--midground-base) 44%, transparent), transparent);
+}
+
+.hermes-model-command__copy,
+.hermes-model-command__matrix {
+  position: relative;
+  z-index: 1;
+}
+
+.hermes-model-command__copy span {
+  font-family: var(--theme-font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--midground-base) 72%, transparent);
+}
+
+.hermes-model-command__copy h2 {
+  max-width: 780px;
+  margin: 0.45rem 0 0;
+  font-family: var(--theme-font-display);
+  font-size: clamp(1.45rem, 3vw, 2.35rem);
+  line-height: 0.98;
+  color: var(--midground);
+  text-wrap: balance;
+}
+
+.hermes-model-command__copy p {
+  max-width: 720px;
+  margin: 0.75rem 0 0;
+  color: color-mix(in srgb, var(--midground-base) 70%, transparent);
+}
+
+.hermes-model-command__matrix {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.hermes-model-command__matrix div {
+  min-width: 0;
+  padding: 0.85rem 0.95rem;
+  border: 1px solid color-mix(in srgb, var(--midground-base) 13%, transparent);
+  border-radius: calc(var(--theme-radius) + 10px);
+  background: color-mix(in srgb, var(--midground-base) 5%, var(--background-base));
+}
+
+.hermes-model-command__matrix strong {
+  display: block;
+  overflow: hidden;
+  font-family: var(--theme-font-mono);
+  font-size: 0.9rem;
+  color: var(--midground);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hermes-model-command__matrix span {
+  display: block;
+  margin-top: 0.25rem;
+  font-family: var(--theme-font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--midground-base) 55%, transparent);
+}
+
+@media (min-width: 900px) {
+  .hermes-model-command {
+    grid-template-columns: minmax(0, 1.55fr) minmax(320px, 0.9fr);
+    align-items: end;
+  }
+}
+
+.hermes-session-brief {
+  position: relative;
+  display: grid;
+  gap: calc(1rem * var(--theme-spacing-mul, 1));
+  padding: calc(1.15rem * var(--theme-spacing-mul, 1));
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--midground-base) 15%, transparent);
+  border-radius: calc(var(--theme-radius) + 14px);
+  background:
+    linear-gradient(120deg, color-mix(in srgb, var(--midground-base) 7%, var(--background-base)), transparent 64%),
+    color-mix(in srgb, var(--background-base) 90%, #000 10%);
+  box-shadow:
+    0 20px 56px color-mix(in srgb, #000 30%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--midground-base) 16%, transparent);
+}
+
+.hermes-session-brief::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 0% 20%, color-mix(in srgb, var(--series-output-token) 16%, transparent), transparent 28%),
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--warm-glow) 32%, transparent), transparent 30%);
+}
+
+.hermes-session-brief__copy,
+.hermes-session-brief__stats {
+  position: relative;
+  z-index: 1;
+}
+
+.hermes-session-brief__copy span {
+  font-family: var(--theme-font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--midground-base) 70%, transparent);
+}
+
+.hermes-session-brief__copy h2 {
+  max-width: 780px;
+  margin: 0.45rem 0 0;
+  font-family: var(--theme-font-display);
+  font-size: clamp(1.4rem, 3vw, 2.25rem);
+  line-height: 0.98;
+  color: var(--midground);
+  text-wrap: balance;
+}
+
+.hermes-session-brief__copy p {
+  max-width: 720px;
+  margin: 0.75rem 0 0;
+  color: color-mix(in srgb, var(--midground-base) 70%, transparent);
+}
+
+.hermes-session-brief__stats {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.hermes-session-brief__stats div {
+  padding: 0.85rem 0.95rem;
+  border: 1px solid color-mix(in srgb, var(--midground-base) 13%, transparent);
+  border-radius: calc(var(--theme-radius) + 10px);
+  background: color-mix(in srgb, var(--background-base) 74%, transparent);
+}
+
+.hermes-session-brief__stats strong {
+  display: block;
+  font-family: var(--theme-font-mono);
+  font-size: 1rem;
+  color: var(--midground);
+}
+
+.hermes-session-brief__stats span {
+  display: block;
+  margin-top: 0.25rem;
+  font-family: var(--theme-font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--midground-base) 55%, transparent);
+}
+
+@media (min-width: 900px) {
+  .hermes-session-brief {
+    grid-template-columns: minmax(0, 1.55fr) minmax(320px, 0.9fr);
+    align-items: end;
+  }
+}

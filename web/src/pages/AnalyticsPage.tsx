@@ -485,6 +485,31 @@ export default function AnalyticsPage() {
     <div className="flex flex-col gap-6">
       <PluginSlot name="analytics:top" />
 
+      <section className="hermes-analytics-command">
+        <div className="hermes-analytics-command__copy">
+          <span>Hermes Lab Analytics</span>
+          <h2>Usage is only useful when it is honest enough to operate from.</h2>
+          <p>
+            This cockpit frames token visibility, model mix and skill activity
+            as readiness signals for cost control, quality review and scale.
+          </p>
+        </div>
+        <div className="hermes-analytics-command__signals">
+          <div>
+            <strong>{showTokens === false ? "Hidden" : showTokens ? "Visible" : "Checking"}</strong>
+            <span>token estimate mode</span>
+          </div>
+          <div>
+            <strong>{data ? `${data.by_model.length}` : "Provider"}</strong>
+            <span>model sources</span>
+          </div>
+          <div>
+            <strong>{data ? `${data.skills.top_skills.length}` : `${days}d`}</strong>
+            <span>skill signals</span>
+          </div>
+        </div>
+      </section>
+
       {showTokens === false && (
         <Card>
           <CardContent className="py-12">

@@ -961,6 +961,31 @@ export default function ModelsPage() {
     <div className="flex min-w-0 max-w-full flex-col gap-6">
       <PluginSlot name="models:top" />
 
+      <section className="hermes-model-command">
+        <div className="hermes-model-command__copy">
+          <span>Model allocation room</span>
+          <h2>Assign premium reasoning only where the mission earns it.</h2>
+          <p>
+            The model layer now reads like an operating decision: main model,
+            auxiliary work, cost visibility and capability fit in one frame.
+          </p>
+        </div>
+        <div className="hermes-model-command__matrix">
+          <div>
+            <strong>{aux?.main.model ? shortModelName(aux.main.model) : "Unset"}</strong>
+            <span>main route</span>
+          </div>
+          <div>
+            <strong>{aux ? aux.tasks.filter((task) => task.provider && task.provider !== "auto").length : "Auto"}</strong>
+            <span>aux overrides</span>
+          </div>
+          <div>
+            <strong>{showTokens ? "Cost visible" : "Cost guarded"}</strong>
+            <span>spend posture</span>
+          </div>
+        </div>
+      </section>
+
       <div className="grid min-w-0 gap-6 lg:grid-cols-2">
         <ModelSettingsPanel
           aux={aux}

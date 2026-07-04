@@ -1250,6 +1250,31 @@ export default function SessionsPage() {
       <PluginSlot name="sessions:top" />
       <Toast toast={toast} />
 
+      <section className="hermes-session-brief">
+        <div className="hermes-session-brief__copy">
+          <span>Session memory room</span>
+          <h2>Every saved conversation should make the next operation smarter.</h2>
+          <p>
+            Sessions are treated as operational memory: searchable, prunable,
+            exportable and safe to resume when the work needs continuity.
+          </p>
+        </div>
+        <div className="hermes-session-brief__stats">
+          <div>
+            <strong>{stats ? stats.total : total}</strong>
+            <span>total sessions</span>
+          </div>
+          <div>
+            <strong>{stats ? stats.active_store : recentSessions.length}</strong>
+            <span>active memory</span>
+          </div>
+          <div>
+            <strong>{stats ? stats.messages : "Search"}</strong>
+            <span>message corpus</span>
+          </div>
+        </div>
+      </section>
+
       <DeleteConfirmDialog
         open={sessionDelete.isOpen}
         onCancel={sessionDelete.cancel}
