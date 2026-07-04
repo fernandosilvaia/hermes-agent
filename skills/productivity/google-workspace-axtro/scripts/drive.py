@@ -1,0 +1,130 @@
+"""
+drive.py — Listar, criar pasta, upload, buscar e compartilhar no Google Drive.
+
+Uso como biblioteca:
+    from drive import list_files, create_folder, upload_file, find_by_name, share_file
+
+Uso como CLI:
+    python drive.py list --max 20
+    python drive.py list --folder <FOLDER_ID>
+    python drive.py mkdir --name "Relatórios" [--parent <FOLDER_ID>]
+    python drive.py upload --path ./arquivo.pdf [--parent <FOLDER_ID>] [--name "outro.pdf"]
+    python drive.py find --name "proposta"
+    python drive.py share --id <FILE_ID> --email fulano@x.com [--role writer]
+
+Papéis de compartilhamento: reader (padrão), commenter, writer.
+"""
+
+import argparse
+import json
+import os
+
+from googleapiclient.http import MediaFileUpload
+
+import auth
+
+FOLDER_MIME = "application/vnd.google-apps.folder"
+
+
+def list_files(max_results: int = 20, folder_id: str = None, query: str = None) -> list:
+    """Lista arquivos/pastas. Restrinja a uma pasta com folder_id ou filtre com query bruta."""
+    q_parts = ["trashed = false"]
+    if folder_id:
+        q_parts.append(f"'{folder_id}' in parents")
+    if query:
+        q_parts.append(query)
+    resp = auth.drive().files().list(
+        q=" and ".join(q_parts),
+        pageSize=max_results,
+        fields="files(id, name, mimeType, modifiedTime, size, webViewLink, parents)",
+        orderBy="modifiedTime desc",
+    ).execute()
+    return resp.get("files", [])
+
+
+def create_folder(name: str, parent_id: str = None) -> dict:
+    body = {"name": name, "mimeType": FOLDER_MIME}
+    if parent_id:
+        body["parents"] = [parent_id]
+    f = auth.drive().files().create(
+        body=body, fields="id, name, webViewLink"
+    ).execute()
+    return f
+
+
+def upload_file(path: str, parent_id: str = None, name: str = None) -> dict:
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"Arquivo não encontrado: {path}")
+    body = {"name": name or os.path.basename(path)}
+    if parent_id:
+        body["parents"] = [parent_id]
+    media = MediaFileUpload(path, resumable=True)
+    f = auth.drive().files().create(
+        body=body, media_body=media, fields="id, name, webViewLink, size"
+    ).execute()
+    return f
+
+
+def find_by_name(name: str, max_results: int = 20) -> list:
+    """Busca arquivos cujo nome contém o texto dado."""
+    safe = name.replace("'", "\\'")
+    return list_files(max_results=max_results, query=f"name contains '{safe}'")
+
+
+def share_file(file_id: str, email: str, role: str = "reader",
+               notify: bool = False) -> dict:
+    """Compartilha um arquivo/pasta com um email. role: reader | commenter | writer."""
+    if role not in ("reader", "commenter", "writer"):
+        raise ValueError("role deve ser reader, commenter ou writer")
+    perm = {"type": "user", "role": role, "emailAddress": email}
+    auth.drive().permissions().create(
+        fileId=file_id, body=perm, sendNotificationEmail=notify,
+        fields="id",
+    ).execute()
+    return {"file_id": file_id, "shared_with": email, "role": role}
+
+
+def _cli():
+    p = argparse.ArgumentParser(description="Google Drive via Hermes")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    l = sub.add_parser("list")
+    l.add_argument("--max", type=int, default=20)
+    l.add_argument("--folder")
+    l.add_argument("--query")
+
+    mk = sub.add_parser("mkdir")
+    mk.add_argument("--name", required=True)
+    mk.add_argument("--parent")
+
+    up = sub.add_parser("upload")
+    up.add_argument("--path", required=True)
+    up.add_argument("--parent")
+    up.add_argument("--name")
+
+    fi = sub.add_parser("find")
+    fi.add_argument("--name", required=True)
+    fi.add_argument("--max", type=int, default=20)
+
+    sh = sub.add_parser("share")
+    sh.add_argument("--id", required=True)
+    sh.add_argument("--email", required=True)
+    sh.add_argument("--role", default="reader")
+    sh.add_argument("--notify", action="store_true")
+
+    args = p.parse_args()
+    if args.cmd == "list":
+        out = list_files(args.max, args.folder, args.query)
+    elif args.cmd == "mkdir":
+        out = create_folder(args.name, args.parent)
+    elif args.cmd == "upload":
+        out = upload_file(args.path, args.parent, args.name)
+    elif args.cmd == "find":
+        out = find_by_name(args.name, args.max)
+    elif args.cmd == "share":
+        out = share_file(args.id, args.email, args.role, args.notify)
+    print(json.dumps(out, ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    _cli()
