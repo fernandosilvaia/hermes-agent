@@ -40,7 +40,9 @@ Gatilhos em linguagem natural e o script correspondente:
 | "adiciona uma linha na planilha de gastos" | `sheets.py append` |
 | "monta uma apresentação com esses tópicos" | `slides.py create` + `slides.py add` |
 | "agenda uma reunião com o cliente terça 15h" | `calendar_events.py create` |
-| "o que tenho na agenda essa semana?" | `calendar_events.py list` |
+| "o que tenho hoje?" / briefing diário | `calendar_events.py today` |
+| "o que tenho na agenda essa semana?" | `calendar_events.py range --days 7` |
+| "o que vem por aí?" (sem filtro de dia) | `calendar_events.py list` |
 
 ## Autenticação (já configurada)
 
@@ -102,7 +104,9 @@ python scripts/slides.py read --id <PRES_ID>
 python scripts/calendar_events.py create --summary "Reunião" \
     --start "2026-07-10T15:00:00" --end "2026-07-10T16:00:00" \
     --tz "America/Sao_Paulo" --attendees "a@x.com,b@y.com"
-python scripts/calendar_events.py list --max 10
+python scripts/calendar_events.py today                # agenda de hoje (nunca desliza pra amanhã se hoje está vazio)
+python scripts/calendar_events.py range --days 7        # próximos 7 dias
+python scripts/calendar_events.py list --max 10         # próximos N eventos, sem limite de dia
 python scripts/calendar_events.py cancel --id <EVENT_ID>
 ```
 
