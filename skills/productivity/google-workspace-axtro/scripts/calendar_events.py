@@ -11,7 +11,9 @@ Uso como CLI:
     python calendar_events.py create --summary "Reunião cliente" \
         --start "2026-07-10T15:00:00" --end "2026-07-10T16:00:00" \
         --tz "America/Sao_Paulo" --attendees "a@x.com,b@y.com" --description "Pauta..."
-    python calendar_events.py list --max 10
+    python calendar_events.py today                  # agenda de HOJE (dia local, nunca desliza pra amanhã)
+    python calendar_events.py range --days 7          # próximos N dias, dia local
+    python calendar_events.py list --max 10           # próximos N eventos, SEM limite de dia (não usar pra "hoje")
     python calendar_events.py edit --id <EVENT_ID> --summary "Novo título"
     python calendar_events.py cancel --id <EVENT_ID>
 
@@ -21,11 +23,31 @@ via --all-day.
 
 import argparse
 import json
-from datetime import datetime, timezone
+import os
+from datetime import datetime, timedelta, timezone
+
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    from backports.zoneinfo import ZoneInfo  # type: ignore[no-redef]
 
 import auth
 
 DEFAULT_TZ = "America/Sao_Paulo"
+
+
+def _local_tz(tz: str = None) -> ZoneInfo:
+    """Resolve the timezone used to decide what "today" means.
+
+    Precedence: explicit --tz, then HERMES_TIMEZONE (same env var the main
+    Hermes process uses, see hermes_time.py), then DEFAULT_TZ. Falls back to
+    DEFAULT_TZ on an invalid name rather than crashing a cron briefing.
+    """
+    name = tz or os.getenv("HERMES_TIMEZONE", "").strip() or DEFAULT_TZ
+    try:
+        return ZoneInfo(name)
+    except Exception:
+        return ZoneInfo(DEFAULT_TZ)
 
 
 def _time_field(value: str, all_day: bool, tz: str) -> dict:
@@ -57,6 +79,15 @@ def create_event(summary: str, start: str, end: str, tz: str = DEFAULT_TZ,
 
 
 def list_upcoming(max_results: int = 10, calendar_id: str = "primary") -> list:
+    """Next N events from now, in calendar order, with NO end boundary.
+
+    Use for "o que vem por aí" queries. For "hoje"/"essa semana" queries use
+    ``list_today`` / ``list_range`` instead — this function will happily
+    return next week's events if there happen to be none left today, and a
+    caller that assumes everything returned is "today" will misreport them
+    as such (see the July-5 briefing incident: an empty Sunday made this
+    return Monday's events, which the cron briefing then labeled as today).
+    """
     now = datetime.now(timezone.utc).isoformat()
     resp = auth.calendar().events().list(
         calendarId=calendar_id, timeMin=now, maxResults=max_results,
@@ -73,6 +104,53 @@ def list_upcoming(max_results: int = 10, calendar_id: str = "primary") -> list:
             "htmlLink": ev.get("htmlLink"),
         })
     return out
+
+
+def _list_window(start_local: datetime, end_local: datetime, calendar_id: str) -> list:
+    resp = auth.calendar().events().list(
+        calendarId=calendar_id,
+        timeMin=start_local.isoformat(),
+        timeMax=end_local.isoformat(),
+        singleEvents=True, orderBy="startTime",
+    ).execute()
+    out = []
+    for ev in resp.get("items", []):
+        start = ev.get("start", {})
+        out.append({
+            "id": ev["id"],
+            "summary": ev.get("summary"),
+            "start": start.get("dateTime", start.get("date")),
+            "location": ev.get("location"),
+            "htmlLink": ev.get("htmlLink"),
+        })
+    return out
+
+
+def list_today(tz: str = None, calendar_id: str = "primary") -> list:
+    """Events whose start falls within *today*, in the local wall-clock day
+    (HERMES_TIMEZONE / --tz / DEFAULT_TZ — see ``_local_tz``).
+
+    Unlike ``list_upcoming``, this NEVER slides into tomorrow: an empty day
+    returns an empty list, so a briefing built on top of this can correctly
+    say "no compromissos hoje" instead of silently reporting tomorrow's
+    events as today's.
+    """
+    zone = _local_tz(tz)
+    today_local = datetime.now(zone).date()
+    start_local = datetime.combine(today_local, datetime.min.time(), tzinfo=zone)
+    end_local = start_local + timedelta(days=1)
+    return _list_window(start_local, end_local, calendar_id)
+
+
+def list_range(days: int = 7, tz: str = None, calendar_id: str = "primary") -> list:
+    """Events from the start of today through the end of ``days`` days from
+    today (inclusive of today), in the local wall-clock day. Use for "essa
+    semana" / "próximos N dias" queries."""
+    zone = _local_tz(tz)
+    today_local = datetime.now(zone).date()
+    start_local = datetime.combine(today_local, datetime.min.time(), tzinfo=zone)
+    end_local = start_local + timedelta(days=days)
+    return _list_window(start_local, end_local, calendar_id)
 
 
 def edit_event(event_id: str, calendar_id: str = "primary", **fields) -> dict:
@@ -110,6 +188,13 @@ def _cli():
     l = sub.add_parser("list")
     l.add_argument("--max", type=int, default=10)
 
+    t = sub.add_parser("today")
+    t.add_argument("--tz", default=None, help="IANA zone; default HERMES_TIMEZONE or DEFAULT_TZ")
+
+    r = sub.add_parser("range")
+    r.add_argument("--days", type=int, default=7)
+    r.add_argument("--tz", default=None, help="IANA zone; default HERMES_TIMEZONE or DEFAULT_TZ")
+
     e = sub.add_parser("edit")
     e.add_argument("--id", required=True)
     e.add_argument("--summary")
@@ -128,6 +213,10 @@ def _cli():
         )
     elif args.cmd == "list":
         out = list_upcoming(args.max)
+    elif args.cmd == "today":
+        out = list_today(args.tz)
+    elif args.cmd == "range":
+        out = list_range(args.days, args.tz)
     elif args.cmd == "edit":
         out = edit_event(
             args.id, summary=args.summary,
