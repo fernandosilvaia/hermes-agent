@@ -33,6 +33,7 @@ no `.env` do hermes-agent (`TELEGRAM_BOT_TOKEN`, `OPENROUTER_API_KEY`).
 | "tem algum prazo batendo?" | `deadlines.py --window 14` |
 | "vazou alguma chave nos commits?" | `secrets_scan.py` |
 | "os projetos internos estão com lint/TS quebrado?" | `lint_check.py` |
+| "tem email não lido importante?" / "triagem da caixa" | `inbox_triage.py` |
 | "ativa o briefing todo dia de manhã" | `install/install-launchd.sh` |
 
 ## Scripts (todos CLI, emitem JSON no stdout)
@@ -49,6 +50,8 @@ python scripts/secrets_scan.py           # vigia de segredo vazado (arquivos ras
 python scripts/deadlines.py --window 14  # prazos nos próximos N dias + vencidos recentes
 python scripts/lint_check.py             # lint/typecheck/test dos projetos INTERNOS
 python scripts/lint_check.py --notify    # idem, avisa no Telegram só se algo falhar
+python scripts/inbox_triage.py           # triagem de axtro@axtroai.com (urgente/spam/rotina)
+python scripts/inbox_triage.py --dry-run # idem, só imprime
 
 # Entrega avulsa
 echo "texto" | python scripts/telegram_send.py
@@ -87,6 +90,11 @@ quando há algo real.
 - **`lint_check.py` é escopo restrito a produtos internos** (`02_PRODUTOS/lab/*`,
   `llm-router`) — nunca toca `01_CLIENTES/`. Se faltar dependência (node_modules,
   ruff/pytest no venv), reporta o gap; nunca instala nada sozinho.
+- **`inbox_triage.py` é 100% heurístico, local — nunca chama LLM externo.** Metadados de
+  email são dados privados de terceiros; mandar isso pra uma API externa (OpenRouter etc.)
+  cruzaria a mesma linha que a regra de LGPD do CLAUDE.md já proíbe para PII de cliente.
+  Diferente do `briefing.py` (que só processa metadados de git), esta fica só com
+  heurística — e nunca marca como lido, responde ou arquiva.
 - **Segredo mascarado.** O vigia nunca imprime a chave inteira — mostra `sk-abc…1234`.
   E ignora placeholders de documentação (upstream Nous, exemplos).
 - **Sem dependência externa.** Stdlib pura (Python 3.9+). Não instala nada, não
