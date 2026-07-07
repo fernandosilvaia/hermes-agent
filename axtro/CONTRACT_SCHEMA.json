@@ -1,0 +1,102 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Axtro Hermes Skill Contract",
+  "description": "Contrato de governança de toda skill Axtro. Campos de segurança são obrigatórios; uma skill sem contract.json válido não entra no registry nem pode ser ativada.",
+  "type": "object",
+  "required": [
+    "id",
+    "name",
+    "owner_agent",
+    "execution_location",
+    "default_model",
+    "autonomy_ring",
+    "tools",
+    "credentials",
+    "max_daily_cost_usd",
+    "inputs",
+    "outputs",
+    "stop_conditions",
+    "telemetry_events",
+    "enabled",
+    "production_ready",
+    "activation_stage"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+$",
+      "description": "snake_case, único no registry"
+    },
+    "name": { "type": "string", "minLength": 3 },
+    "owner_agent": {
+      "type": "string",
+      "description": "papel operacional dono (ex: cto, agentops-architect, skills-librarian)"
+    },
+    "execution_location": {
+      "type": "string",
+      "enum": ["macbook", "vps", "both"],
+      "description": "onde a skill roda de fato — os repos vivem no MacBook, as integrações (Google/Telnyx) na VPS"
+    },
+    "default_model": {
+      "type": "string",
+      "enum": ["none", "haiku", "sonnet", "opus", "claude-code", "codex"],
+      "description": "'none' = script determinístico, nunca chama LLM"
+    },
+    "autonomy_ring": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 3,
+      "description": "0 leitura · 1 escrita interna limitada (branch hermes/*, PR, dry-run) · 2 ação externa controlada · 3 exige humano. Anel 4 é proibido — não existe contrato para ele."
+    },
+    "tools": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "capacidades usadas: terminal, telegram, gmail, sms, llm, github, stripe_read…"
+    },
+    "credentials": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+      "description": "NOMES de env vars, nunca valores. Vazio = zero credencial."
+    },
+    "max_daily_cost_usd": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 50,
+      "description": "teto diário; 0 = custo zero (sem LLM/API paga). Acima de 50 exige redesenho, não contrato."
+    },
+    "inputs": { "type": "array", "items": { "type": "string" } },
+    "outputs": { "type": "array", "items": { "type": "string" } },
+    "stop_conditions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "description": "condições que interrompem a skill — obrigatório ter pelo menos uma"
+    },
+    "telemetry_events": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z0-9_]+\\.[a-z0-9_.]+$" },
+      "minItems": 1,
+      "description": "eventos emitidos (skill_id.evento)"
+    },
+    "enabled": {
+      "type": "boolean",
+      "description": "toda skill NASCE false; ativação é ato humano registrado"
+    },
+    "production_ready": {
+      "type": "boolean",
+      "description": "só vira true após checklist de produção completo + revisão adversarial"
+    },
+    "activation_stage": {
+      "type": "string",
+      "enum": ["scaffold", "staging", "production"],
+      "description": "scaffold = estrutura; staging = testado em dry-run/dados simulados; production = liberado com gate humano"
+    },
+    "human_gates": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "ações desta skill que SEMPRE exigem humano, mesmo com enabled=true"
+    },
+    "notes": { "type": "string" }
+  },
+  "additionalProperties": true
+}
