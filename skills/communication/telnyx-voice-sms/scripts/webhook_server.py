@@ -59,6 +59,23 @@ TOLERANCE = int(os.environ.get("TELNYX_TOLERANCE_SECONDS", "300"))
 VERIFY_SIGNATURE = os.environ.get("TELNYX_VERIFY_SIGNATURE", "true").lower() != "false"
 TELNYX_CALLS_API = "https://api.telnyx.com/v2/calls"
 
+# ── Modo conversacional (ElevenLabs Conversational AI) — OFF por padrão ──
+# Só ativa quando ELEVENLABS_AGENT_ID está setado. Enquanto não estiver, o webhook
+# usa o TTS simples (_speak) exatamente como antes. Ver docstring de _start_conversational.
+ELEVENLABS_AGENT_ID = os.environ.get("ELEVENLABS_AGENT_ID", "").strip()
+ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "").strip()
+# WS do bridge de áudio bidirecional (Telnyx media stream ↔ ElevenLabs). Precisa ser
+# provisionado/iterado ao vivo na VPS — enquanto vazio, o modo conversacional loga e cai
+# no TTS simples em vez de fingir que a ponte existe.
+ELEVENLABS_BRIDGE_WS_URL = os.environ.get("ELEVENLABS_BRIDGE_WS_URL", "").strip()
+ELEVENLABS_SIGNED_URL_API = (
+    "https://api.elevenlabs.io/v1/convai/conversation/get-signed-url"
+)
+
+
+def conversational_enabled() -> bool:
+    return bool(ELEVENLABS_AGENT_ID)
+
 # regex para código de verificação (4 a 8 dígitos) — conveniência para OTP de cadastro
 _OTP_RE = re.compile(r"\b(\d{4,8})\b")
 
@@ -173,6 +190,92 @@ def _speak(call_control_id: str, text: str) -> None:
     )
 
 
+def _elevenlabs_signed_url() -> str:
+    """Pede à ElevenLabs uma signed URL para o agente conversacional configurado.
+
+    Endpoint documentado: GET /v1/convai/conversation/get-signed-url?agent_id=...
+    Retorna string vazia em qualquer falha (o chamador cai no TTS simples).
+    """
+    if not (ELEVENLABS_AGENT_ID and ELEVENLABS_API_KEY):
+        return ""
+    try:
+        resp = requests.get(
+            ELEVENLABS_SIGNED_URL_API,
+            params={"agent_id": ELEVENLABS_AGENT_ID},
+            headers={"xi-api-key": ELEVENLABS_API_KEY},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return resp.json().get("signed_url", "")
+    except (requests.RequestException, ValueError):
+        return ""
+
+
+def _start_conversational(call_control_id: str, greeting: str) -> bool:
+    """Inicia conversa por IA (ElevenLabs) numa chamada atendida.
+
+    Estado hoje:
+      • A iniciação (signed URL da ElevenLabs + streaming_start da Telnyx apontando pro
+        bridge) está implementada e é a parte documentada/estável.
+      • O BRIDGE de áudio bidirecional (WS que faz Telnyx media stream ↔ ElevenLabs
+        Conversational WS em tempo real) precisa ser provisionado e iterado AO VIVO na VPS,
+        com uma ligação de teste real — não dá pra validar localmente. Enquanto
+        ELEVENLABS_BRIDGE_WS_URL não estiver setado, esta função devolve False e o chamador
+        usa o TTS simples (sem fingir que a ponte existe).
+
+    Retorna True se conseguiu iniciar o streaming conversacional; False caso contrário.
+    """
+    if not ELEVENLABS_BRIDGE_WS_URL:
+        _append_jsonl(CALL_LOG_PATH, {
+            "at": _now_iso(), "event": "conversational_skipped",
+            "reason": "ELEVENLABS_BRIDGE_WS_URL ausente (bridge de áudio não provisionado)",
+            "call_control_id": call_control_id,
+        })
+        return False
+
+    signed_url = _elevenlabs_signed_url()
+    if not signed_url:
+        _append_jsonl(CALL_LOG_PATH, {
+            "at": _now_iso(), "event": "conversational_skipped",
+            "reason": "falha ao obter signed_url da ElevenLabs",
+            "call_control_id": call_control_id,
+        })
+        return False
+
+    key = os.environ.get("TELNYX_API_KEY")
+    if not key:
+        return False
+    try:
+        # O bridge recebe a signed_url via querystring e conecta na ElevenLabs por dentro.
+        stream_url = ELEVENLABS_BRIDGE_WS_URL
+        sep = "&" if "?" in stream_url else "?"
+        stream_url = "{}{}signed_url={}".format(stream_url, sep, signed_url)
+        requests.post(
+            "{}/{}/actions/streaming_start".format(TELNYX_CALLS_API, call_control_id),
+            headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"},
+            json={
+                "stream_url": stream_url,
+                "stream_track": "both_tracks",
+                "stream_bidirectional_mode": "rtp",
+            },
+            timeout=10,
+        )
+        # Enquanto o bridge assume, um cumprimento curto evita silêncio no atendimento.
+        if greeting:
+            _speak(call_control_id, greeting)
+        _append_jsonl(CALL_LOG_PATH, {
+            "at": _now_iso(), "event": "conversational_started",
+            "call_control_id": call_control_id,
+        })
+        return True
+    except requests.RequestException as exc:
+        _append_jsonl(CALL_LOG_PATH, {
+            "at": _now_iso(), "event": "conversational_error",
+            "reason": str(exc)[:200], "call_control_id": call_control_id,
+        })
+        return False
+
+
 def _decode_state(client_state: str) -> str:
     if not client_state:
         return ""
@@ -203,20 +306,17 @@ async def voice_webhook(
         "result": payload.get("result"),  # presente em call.machine.detection.ended
     })
 
-    # Quando a chamada é atendida, fala o texto que veio no client_state.
+    # Quando a chamada é atendida: se o modo conversacional (ElevenLabs) estiver
+    # habilitado, tenta iniciar a conversa por IA; senão (ou se a iniciação falhar),
+    # cai no TTS simples com o texto que veio no client_state — comportamento original.
     if event_type == "call.answered" and ccid:
         message = _decode_state(payload.get("client_state", ""))
-        if message:
+        if conversational_enabled():
+            started = _start_conversational(ccid, greeting=message or "Um momento.")
+            if not started and message:
+                _speak(ccid, message)  # fallback gracioso
+        elif message:
             _speak(ccid, message)
-
-    # ──────────────────────────────────────────────────────────────────────
-    # GANCHO PARA VERSÃO FUTURA — ElevenLabs Conversational AI:
-    # Em vez de _speak() com TTS simples, aqui entraria o bridge para o
-    # ElevenLabs (SIP/streaming) para conversa por IA em tempo real, como no
-    # padrão do Billion CRM. Não implementado nesta primeira versão.
-    # Fluxo: call.answered → abrir stream de mídia (stream_url) → ElevenLabs
-    #        Conversational AI conduz o diálogo → eventos de transcrição.
-    # ──────────────────────────────────────────────────────────────────────
 
     return {"ok": True}
 

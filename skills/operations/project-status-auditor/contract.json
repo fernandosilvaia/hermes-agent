@@ -1,0 +1,19 @@
+{
+  "id": "project_status_auditor",
+  "name": "Project Status Auditor",
+  "owner_agent": "cto",
+  "execution_location": "macbook",
+  "default_model": "haiku",
+  "autonomy_ring": 0,
+  "tools": ["terminal"],
+  "credentials": [],
+  "max_daily_cost_usd": 0.02,
+  "inputs": ["roots (opcional)", "stale_days (opcional)"],
+  "outputs": ["auditoria_json", "resumo_texto_telegram", "lista_atencao"],
+  "stop_conditions": [
+    "só lê git local — nunca commita, faz push, altera branch ou toca arquivo",
+    "repo/dir inválido vira flag 'erro' e a varredura continua nos demais",
+    "zero credencial — não acessa rede a não ser telemetria best-effort opcional"
+  ],
+  "telemetry_events": ["project_status_auditor.run"]
+}
