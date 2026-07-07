@@ -1,0 +1,13 @@
+{
+  "currency": "BRL",
+  "monthly_cap": 500.0,
+  "per_purchase_cap": 300.0,
+  "vendor_allowlist": [
+    "OpenRouter",
+    "Railway",
+    "Anthropic",
+    "Supabase",
+    "ElevenLabs",
+    "Telnyx"
+  ]
+}
