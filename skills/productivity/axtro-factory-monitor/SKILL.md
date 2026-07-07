@@ -34,6 +34,7 @@ no `.env` do hermes-agent (`TELEGRAM_BOT_TOKEN`, `OPENROUTER_API_KEY`).
 | "vazou alguma chave nos commits?" | `secrets_scan.py` |
 | "os projetos internos estão com lint/TS quebrado?" | `lint_check.py` |
 | "tem email não lido importante?" / "triagem da caixa" | `inbox_triage.py` |
+| "atualiza o estado vivo da empresa" / "o roteamento de agentes está consistente?" | `consolidate_state.py` |
 | "ativa o briefing todo dia de manhã" | `install/install-launchd.sh` |
 
 ## Scripts (todos CLI, emitem JSON no stdout)
@@ -52,6 +53,8 @@ python scripts/lint_check.py             # lint/typecheck/test dos projetos INTE
 python scripts/lint_check.py --notify    # idem, avisa no Telegram só se algo falhar
 python scripts/inbox_triage.py           # triagem de axtro@axtroai.com (urgente/spam/rotina)
 python scripts/inbox_triage.py --dry-run # idem, só imprime
+python scripts/consolidate_state.py      # gera 03_AGENTES/ESTADO_VIVO.md (CLAUDE.md + roster + drift)
+python scripts/consolidate_state.py --dry-run  # só o relatório de consistência, não escreve
 
 # Entrega avulsa
 echo "texto" | python scripts/telegram_send.py
@@ -95,6 +98,9 @@ quando há algo real.
   cruzaria a mesma linha que a regra de LGPD do CLAUDE.md já proíbe para PII de cliente.
   Diferente do `briefing.py` (que só processa metadados de git), esta fica só com
   heurística — e nunca marca como lido, responde ou arquiva.
+- **`consolidate_state.py` reproduz o CLAUDE.md verbatim** (nunca resumido/reescrito por
+  LLM) — regras da empresa não podem sofrer drift de paráfrase. Escreve só em
+  `03_AGENTES/ESTADO_VIVO.md`, local, versionado à parte deste repo.
 - **Segredo mascarado.** O vigia nunca imprime a chave inteira — mostra `sk-abc…1234`.
   E ignora placeholders de documentação (upstream Nous, exemplos).
 - **Sem dependência externa.** Stdlib pura (Python 3.9+). Não instala nada, não
