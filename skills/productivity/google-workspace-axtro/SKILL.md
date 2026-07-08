@@ -70,7 +70,10 @@ Todos os scripts funcionam como **CLI** (jeito recomendado para o agente shell-o
 
 ```bash
 # Gmail
-python scripts/gmail.py send --to fulano@x.com --subject "Oi" --body "Corpo do email"
+# send é DRY-RUN por padrão e BLOQUEIA destinatários externos (mesmo gate do drive share,
+# ver "Segurança" abaixo): externo exige --approve-external + domínio em
+# GOOGLE_WORKSPACE_EXTERNAL_ALLOWED_DOMAINS, e a API só é chamada com --execute + as 2 envs.
+python scripts/gmail.py send --to colega@axtroai.com --subject "Oi" --body "Corpo do email"
 python scripts/gmail.py list --max 10
 python scripts/gmail.py search --query "from:cliente@x.com is:unread"
 python scripts/gmail.py read --id <MESSAGE_ID>
@@ -126,7 +129,7 @@ python scripts/calendar_events.py cancel --id <EVENT_ID>
 - **Arquivo/ID inexistente** (`HttpError 404`) → confirmar o ID; para Drive, buscar por nome
   antes com `drive.py find`.
 
-## 🔒 Segurança do `share` (P0 — canal de exfiltração fechado)
+## 🔒 Segurança de `share`, `send` e `create` (P0 — canal de exfiltração fechado)
 
 Num daemon 24/7 que lê emails/Telegram não-confiáveis, `drive.py share` era um canal
 de exfiltração: um prompt-injection podia mandar compartilhar um arquivo corporativo
@@ -195,16 +198,26 @@ Workspace (escopos por serviço mais estreitos, ou uma segunda service account s
 `list`/`find`) numa janela de manutenção com gate humano. Enquanto o escopo for total, a
 guarda-corpo do `share` acima é a mitigação principal do vetor de exfiltração.
 
-### ⚠️ Risco residual conhecido: `gmail.py send` é canal de exfiltração NÃO fechado
+### ✅ Canais irmãos fechados: `gmail.py send` e `calendar_events.py create`
 
-`drive.py share` foi blindado, mas `gmail.py send` (`send_email`) continua **sem gate**:
-envia para **qualquer** destinatário (inclusive externo) chamando a API do Gmail na hora,
-sem dry-run e sem as envs de execução. Num daemon 24/7 que lê conteúdo não-confiável, um
-prompt-injection pode exfiltrar conteúdo corporativo por email (`--to attacker@evil.com`)
-exatamente como fazia via share. **Antes de ativar a skill em produção**, aplicar ao
-`gmail.py send` o mesmo padrão: dry-run por padrão + gate `HERMES_ALLOW_EXECUTE` /
-`GOOGLE_WORKSPACE_AXTRO_ENABLED` + allowlist de domínio para destinatários externos.
-Rastreado como P0-restante.
+Enviar email e convidar attendee (que dispara `sendUpdates="all"`) exfiltram dado
+corporativo tão bem quanto `drive.py share`. Os dois recebem **o mesmo padrão** acima,
+pelo mesmo `scripts/_share_policy.py`:
+
+- **dry-run por padrão + gate de dupla-env.** `send_email`/`create_event` são
+  `dry_run=True` por padrão e só chamam a API com `--execute` **e** `HERMES_ALLOW_EXECUTE=true`
+  **e** `GOOGLE_WORKSPACE_AXTRO_ENABLED=true` (`resolve_execution`). Vale para CLI **e**
+  biblioteca (fail-closed); criar evento sem attendees ainda respeita o gate por ser mutação.
+- **allowlist de destinatário externo.** Toda a lista `to`+`cc`+`bcc` (e os attendees do
+  evento) passa por `evaluate_recipients` **antes** da API: destinatário externo ao domínio
+  da empresa é **BLOQUEADO**, e `--approve-external` sozinho **não** basta — o domínio precisa
+  estar em `GOOGLE_WORKSPACE_EXTERNAL_ALLOWED_DOMAINS` (setada fora de banda por um humano).
+- **leituras seguem autônomas.** `gmail list`/`search`/`read`/`mark-read` e as leituras de
+  agenda (`today`/`range`/`list`) não são mutação e continuam livres.
+
+Provado por `tests/test_comms_gate.py` (pure + wiring por stub, sem rede/credencial):
+destinatário/attendee externo → **0 chamadas de API**; PERMITIDO porém dry-run → **0
+chamadas**; PERMITIDO + gate aberto → **exatamente 1 chamada**.
 
 ### ⚠️ Risco residual conhecido: sem confirmação humana por-requisição
 
