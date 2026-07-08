@@ -26,6 +26,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "axtro"))
 import contract_guard as cg  # noqa: E402
+import autonomy_core as ac  # noqa: E402  (cérebro único)
 
 GOVERNED_LIST = REPO / "axtro" / "GOVERNED_SKILLS.txt"
 
@@ -46,20 +47,27 @@ def scan(env: dict | None = None) -> dict:
     governed_set = set(governed)
     results = []
 
-    # 1. Skills governadas: aplica o guard.
+    # 1. Skills governadas: aplica o autonomy_core (cérebro único).
     for rel in governed:
         sdir = REPO / rel
         exists = sdir.is_dir()
         contract, errs = cg.load_contract(sdir) if exists else (None, ["diretorio ausente"])
-        decision = cg.authorize(sdir, env) if exists else {
-            "allow_real": False, "max_mode": "blocked", "reasons": ["diretorio ausente"]}
+        if exists:
+            d = ac.decide(sdir, env, native=False)
+            allow_real, mode, reasons, risk = d.allow_real, d.mode, d.reasons, d.risk_class
+            needs_approval = d.needs_approval
+        else:
+            allow_real, mode, reasons, risk, needs_approval = (
+                False, "blocked", ["diretorio ausente"], "?", False)
         results.append({
             "skill": rel,
             "class": "governada",
             "has_contract": contract is not None,
-            "allow_real": decision["allow_real"],
-            "max_mode": decision["max_mode"],
-            "reasons": decision["reasons"],
+            "allow_real": allow_real,
+            "max_mode": mode,
+            "risk_class": risk,
+            "needs_approval": needs_approval,
+            "reasons": reasons,
         })
 
     # 2. Demais skills: nativas Nous → pass-through (reporta, não governa).
@@ -104,12 +112,13 @@ def main():
         for r in result["governed"]:
             flag = "🟢 REAL" if r["allow_real"] else "🔴 BLOQ"
             ctr = "" if r["has_contract"] else " (SEM CONTRACT — legacy sensível)"
-            print("  {} [{}] {}{}".format(flag, r["max_mode"], r["skill"], ctr))
+            risk = r.get("risk_class", "?")
+            print("  {} [{}·{}] {}{}".format(flag, r["max_mode"], risk, r["skill"], ctr))
             if not r["allow_real"]:
-                print("        motivo: {}".format(r["reasons"][0] if r["reasons"] else "?"))
+                print("        motivo: {}".format(r["reasons"][-1] if r["reasons"] else "?"))
 
     broken = [r for r in result["governed"]
-              if not r["has_contract"] or "R2" in " ".join(r["reasons"])]
+              if not r["has_contract"] or "inválido" in " ".join(r["reasons"]).lower()]
     sys.exit(1 if (args.strict and broken) else 0)
 
 

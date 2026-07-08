@@ -12,3 +12,8 @@ skills/productivity/ask-vps-hermes
 skills/finance/hermes-purchase
 skills/operations/project-status-auditor
 skills/productivity/axtro-factory-monitor
+
+# --- Exemplos do Autonomy Core (demonstração; seguros, governados p/ o Fernando testar) ---
+axtro/skill_examples/safe-diagnostic
+axtro/skill_examples/charge-customer
+axtro/skill_examples/prepare-prod-change

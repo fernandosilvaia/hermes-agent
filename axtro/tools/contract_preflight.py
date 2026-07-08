@@ -33,7 +33,8 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "axtro"))
-import contract_guard as cg  # noqa: E402
+import contract_guard as cg  # noqa: E402  (mantido p/ compat de quem importa daqui)
+import autonomy_core as ac  # noqa: E402
 
 GOVERNED_LIST = REPO / "axtro" / "GOVERNED_SKILLS.txt"
 EXIT_ALLOW = 0
@@ -63,28 +64,34 @@ def _default_is_governed(rel: str, sdir: Path) -> bool:
 
 
 def preflight_decision(skill_path, env=None, is_governed=None) -> dict:
-    """Decisão estruturada. Fail-closed em qualquer erro.
+    """Decisão estruturada. Fail-closed em qualquer erro. Delega ao autonomy_core
+    (cérebro único: kill switch, anel, classe de risco, aprovação).
 
     Retorna: {code, allow: bool, governed: bool, mode: str, msg: str}
-      mode ∈ {'production','staging','dry_run','blocked','passthrough'}
+      mode ∈ {'production','staging','dry_run','blocked','killed','passthrough'}
+      allow = ação REAL autorizada (dry-run NÃO conta como allow).
     """
     check = is_governed or _default_is_governed
     try:
         sdir = Path(skill_path).resolve()
         rel = _rel(sdir)
-        if not check(rel, sdir):
-            # Skill nativa da Nous — não governada, pass-through (nunca bloqueia).
+        governed = check(rel, sdir)
+        d = ac.decide(sdir, env, native=not governed)
+        motivo = (d.reasons or ["-"])[0]
+
+        if d.mode == "passthrough":
             return {"code": EXIT_ALLOW, "allow": True, "governed": False,
                     "mode": "passthrough",
                     "msg": "PASSTHROUGH: skill nativa (nao governada pela Axtro): {}".format(rel)}
-        decision = cg.authorize(sdir, env)
-        if decision.get("allow_real"):
-            return {"code": EXIT_ALLOW, "allow": True, "governed": True,
-                    "mode": decision.get("max_mode"),
-                    "msg": "AUTORIZADA (modo {}): {}".format(decision.get("max_mode"), rel)}
-        motivo = (decision.get("reasons") or ["bloqueada"])[0]
-        return {"code": EXIT_BLOCK, "allow": False, "governed": True,
-                "mode": "blocked",
+        if d.allow_real:
+            return {"code": EXIT_ALLOW, "allow": True, "governed": True, "mode": d.mode,
+                    "msg": "AUTORIZADA (modo {}): {}".format(d.mode, rel)}
+        if d.mode == "dry_run":
+            # dry-run permitido, mas AÇÃO REAL bloqueada → exit 10 (o gate é sobre ação real).
+            return {"code": EXIT_BLOCK, "allow": False, "governed": True, "mode": "dry_run",
+                    "msg": "BLOQUEADA (acao real) — DRY-RUN permitido: {} — {}".format(rel, motivo)}
+        # blocked / killed
+        return {"code": EXIT_BLOCK, "allow": False, "governed": True, "mode": d.mode,
                 "msg": "BLOQUEADA: {} — {}".format(rel, motivo)}
     except Exception as e:  # noqa: BLE001 — fail-closed
         return {"code": EXIT_BLOCK, "allow": False, "governed": True,

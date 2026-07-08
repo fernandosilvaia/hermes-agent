@@ -1,0 +1,14 @@
+{
+  "id": "safe-diagnostic",
+  "description": "Diagnóstico read-only da fábrica — EXEMPLO de skill SEGURA que roda sozinha.",
+  "enabled": true,
+  "production_ready": true,
+  "activation_stage": "production",
+  "autonomy_ring": 0,
+  "risk_class": "safe",
+  "stop_conditions": ["erro inesperado", "output vazio"],
+  "telemetry_events": ["diagnostic.run"],
+  "credentials": [],
+  "human_gates": [],
+  "rollback": {"supported": false, "motivo": "read-only — nada a desfazer"}
+}
