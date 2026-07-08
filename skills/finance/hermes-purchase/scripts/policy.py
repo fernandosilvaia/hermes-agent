@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from datetime import datetime
 from pathlib import Path
 
@@ -71,9 +72,13 @@ def month_to_date_spent(month: str = None) -> float:
     for e in load_ledger():
         if e.get("month") == month and e.get("status") in ("aprovada", "paga"):
             try:
-                total += float(e.get("amount", 0))
+                amt = float(e.get("amount", 0))
             except (TypeError, ValueError):
                 continue
+            # defesa: entradas com valor não-finito (NaN/Infinity) nunca contam
+            if not math.isfinite(amt):
+                continue
+            total += amt
     return round(total, 2)
 
 
@@ -91,13 +96,24 @@ def check(vendor: str, amount: float) -> dict:
     allow = [v for v in cfg.get("vendor_allowlist", [])]
     if _norm(vendor) not in [_norm(v) for v in allow]:
         reasons.append("fornecedor '{}' fora da allowlist".format(vendor))
-    if amount <= 0:
-        reasons.append("valor inválido")
-    if amount > cfg["per_purchase_cap"]:
-        reasons.append("acima do teto por compra (R$ {:.2f})".format(cfg["per_purchase_cap"]))
-    if amount > remaining:
-        reasons.append("estoura o teto mensal (restam R$ {:.2f} de R$ {:.2f})".format(
-            remaining, cfg["monthly_cap"]))
+
+    # BUG-FIX (P0): rejeitar valores não-finitos ANTES de qualquer comparação.
+    # NaN faz todas as comparações (<=, >) retornarem False, então um `--amount nan`
+    # passava como PODE_PERGUNTAR e furava os tetos. Guardamos math.isfinite primeiro.
+    try:
+        amt = float(amount)
+    except (TypeError, ValueError):
+        amt = float("nan")
+    if not math.isfinite(amt):
+        reasons.append("valor inválido (não-finito: NaN/Infinity rejeitado)")
+    else:
+        if amt <= 0:
+            reasons.append("valor inválido")
+        if amt > cfg["per_purchase_cap"]:
+            reasons.append("acima do teto por compra (R$ {:.2f})".format(cfg["per_purchase_cap"]))
+        if amt > remaining:
+            reasons.append("estoura o teto mensal (restam R$ {:.2f} de R$ {:.2f})".format(
+                remaining, cfg["monthly_cap"]))
 
     decision = "PODE_PERGUNTAR" if not reasons else "BLOQUEADA"
     return {

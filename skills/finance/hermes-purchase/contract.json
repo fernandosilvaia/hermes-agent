@@ -1,0 +1,46 @@
+{
+  "id": "hermes_purchase",
+  "name": "Hermes Purchase (guarda-corpo de gasto)",
+  "owner_agent": "cfo",
+  "execution_location": "macbook",
+  "default_model": "haiku",
+  "autonomy_ring": 3,
+  "tools": ["terminal", "telegram"],
+  "credentials": [],
+  "max_daily_cost_usd": 0.0,
+  "inputs": [
+    "vendor",
+    "amount",
+    "reason",
+    "approval_token (só no confirm; entregue fora do daemon, via Telegram)"
+  ],
+  "outputs": [
+    "decisao_policy_json",
+    "pedido_pendente_no_ledger",
+    "mensagem_aprovacao_telegram_humano",
+    "resultado_confirm_json",
+    "audit_log_append_only"
+  ],
+  "stop_conditions": [
+    "confirm exige approval-token entregue fora do daemon (só no Telegram do dono) + env humana HERMES_PURCHASE_ALLOW_CONFIRM=true; o daemon nunca auto-aprova",
+    "nunca cobra, paga, abre checkout ou chama gateway/cartão — é só guarda-corpo + registro",
+    "ação real (confirm) exige gate padrão: SEM --dry-run + HERMES_ALLOW_EXECUTE=true + env da skill; --dry-run explícito sempre vence",
+    "amount não-finito (NaN/Infinity) é BLOQUEADO na policy antes de qualquer comparação de teto",
+    "token cru nunca vai para stdout nem para o audit.log — só o hash sha256 / prefixo",
+    "toda tentativa de confirm (sucesso, recusa ou dry-run) é registrada append-only em audit.log"
+  ],
+  "telemetry_events": [
+    "hermes_purchase.request.pendente",
+    "hermes_purchase.request.dry_run",
+    "hermes_purchase.confirm.confirmada",
+    "hermes_purchase.confirm.recusada",
+    "hermes_purchase.confirm.dry_run"
+  ],
+  "enabled": false,
+  "production_ready": false,
+  "activation_stage": "staging",
+  "human_gates": [
+    "aprovar qualquer compra (confirm real exige approval-token do Telegram do dono + HERMES_PURCHASE_ALLOW_CONFIRM=true, envs que vivem FORA do ambiente do daemon)"
+  ],
+  "notes": "P0 fechado: gate humano passou de convenção para enforcement real (token hasheado no ledger + env humana + audit append-only). Ativação em produção é ato humano."
+}
