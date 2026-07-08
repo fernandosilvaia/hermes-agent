@@ -55,6 +55,32 @@ class PolicyTestCase(unittest.TestCase):
         self.assertEqual(policy.check("Anthropic", 0)["decision"], "BLOQUEADA")
         self.assertEqual(policy.check("Anthropic", -10)["decision"], "BLOQUEADA")
 
+    def test_nan_amount_is_blocked(self):
+        # BUG-FIX P0: NaN faz <=/> retornarem False; antes passava como PODE_PERGUNTAR
+        # (fornecedor válido + nenhuma comparação de teto disparando) e furava o teto.
+        result = policy.check("OpenRouter", float("nan"))
+        self.assertEqual(result["decision"], "BLOQUEADA")
+        self.assertTrue(any("não-finito" in b for b in result["blockers"]))
+
+    def test_infinity_amount_is_blocked(self):
+        result = policy.check("OpenRouter", float("inf"))
+        self.assertEqual(result["decision"], "BLOQUEADA")
+        self.assertTrue(any("não-finito" in b for b in result["blockers"]))
+
+    def test_nan_string_amount_is_blocked(self):
+        # simula um `--amount nan` (argparse type=float aceita 'nan') vindo do daemon
+        result = policy.check("OpenRouter", float("nan"))
+        self.assertEqual(result["decision"], "BLOQUEADA")
+
+    def test_nan_ledger_entry_does_not_poison_month_total(self):
+        month = policy._current_month()
+        self._write_ledger([
+            {"id": "p1", "month": month, "amount": 100, "status": "aprovada"},
+            {"id": "p2", "month": month, "amount": float("nan"), "status": "aprovada"},
+        ])
+        # o gasto do mês continua finito e correto, ignorando a entrada NaN
+        self.assertEqual(policy.month_to_date_spent(), 100.0)
+
     def test_pending_purchase_does_not_consume_monthly_cap(self):
         month = policy._current_month()
         self._write_ledger([

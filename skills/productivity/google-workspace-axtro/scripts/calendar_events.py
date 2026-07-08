@@ -32,6 +32,7 @@ except ImportError:
     from backports.zoneinfo import ZoneInfo  # type: ignore[no-redef]
 
 import auth
+import _share_policy
 
 DEFAULT_TZ = "America/Sao_Paulo"
 
@@ -59,7 +60,30 @@ def _time_field(value: str, all_day: bool, tz: str) -> dict:
 def create_event(summary: str, start: str, end: str, tz: str = DEFAULT_TZ,
                  description: str = None, location: str = None,
                  attendees: list = None, all_day: bool = False,
-                 calendar_id: str = "primary") -> dict:
+                 calendar_id: str = "primary", approve_external: bool = False,
+                 dry_run: bool = True) -> dict:
+    """Cria um evento. SEGURANÇA (P0 — canal irmão): `sendUpdates="all"` emaila
+    todos os attendees automaticamente, então convidar um externo é comunicação
+    externa. A lista de attendees passa por `_share_policy.evaluate_recipients`
+    antes da API: attendee externo é BLOQUEADO por padrão. dry_run=True (default)
+    nunca chama a API; só cria de verdade com PERMITIDO E o gate de dupla-env aberto.
+    """
+    would = {"summary": summary, "start": start, "end": end, "attendees": attendees}
+    # 1. Política de destinatário externo (só quando há attendees — sendUpdates=all
+    #    notifica todos, então convidar externo é comunicação externa).
+    if attendees:
+        verdict = _share_policy.evaluate_recipients(attendees, approve_external=approve_external)
+        if verdict["decision"] == "BLOQUEADO":
+            return {"created": False, "blocked": True, "verdict": verdict, **would}
+    # 2. Gate de execução SEMPRE (mesmo sem attendees): criar evento é mutação,
+    #    então dry-run é o default até o gate de dupla-env abrir.
+    if dry_run:
+        return {"created": False, "dry_run": True, "would_create": would}
+    gate = _share_policy.resolve_execution(dry_run_flag=False)
+    if gate["dry_run"]:
+        return {"created": False, "dry_run": True, "gate_blocked": True,
+                "would_create": would, "gate": gate}
+
     body = {
         "summary": summary,
         "start": _time_field(start, all_day, tz),
@@ -184,6 +208,10 @@ def _cli():
     c.add_argument("--location")
     c.add_argument("--attendees", help="emails vírgula-separados")
     c.add_argument("--all-day", action="store_true")
+    c.add_argument("--approve-external", action="store_true",
+                   help="aprova attendee externo (só vale com o dominio na allowlist de parceiros)")
+    c.add_argument("--execute", action="store_true", help="sai do dry-run (precisa das duas envs do gate)")
+    c.add_argument("--dry-run", action="store_true", help="forca dry-run (sempre vence)")
 
     l = sub.add_parser("list")
     l.add_argument("--max", type=int, default=10)
@@ -207,9 +235,12 @@ def _cli():
     args = p.parse_args()
     if args.cmd == "create":
         attendees = args.attendees.split(",") if args.attendees else None
+        dry_run = getattr(args, "dry_run", False) or not getattr(args, "execute", False)
         out = create_event(
             args.summary, args.start, args.end, args.tz,
             args.description, args.location, attendees, args.all_day,
+            approve_external=getattr(args, "approve_external", False),
+            dry_run=dry_run,
         )
     elif args.cmd == "list":
         out = list_upcoming(args.max)

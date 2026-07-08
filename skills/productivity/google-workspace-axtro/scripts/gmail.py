@@ -19,6 +19,7 @@ import json
 from email.message import EmailMessage
 
 import auth
+import _share_policy
 
 
 def _raw(message: EmailMessage) -> dict:
@@ -26,8 +27,32 @@ def _raw(message: EmailMessage) -> dict:
 
 
 def send_email(to: str, subject: str, body: str, cc: str = None, bcc: str = None,
-               html: bool = False) -> dict:
-    """Envia um email. `to`/`cc`/`bcc` podem ser vírgula-separados."""
+               html: bool = False, approve_external: bool = False,
+               dry_run: bool = True) -> dict:
+    """Envia um email. `to`/`cc`/`bcc` podem ser vírgula-separados.
+
+    SEGURANÇA (P0 — canal irmão de exfiltração): enviar email é tão capaz de
+    vazar dado corporativo para fora quanto drive.share. Toda a lista de
+    destinatários (to+cc+bcc) passa por `_share_policy.evaluate_recipients`
+    ANTES de qualquer chamada de API: destinatário externo ao domínio da empresa
+    é BLOQUEADO por padrão (só liberado com approve_external + allowlist de
+    parceiros configurada fora de banda por um humano). dry_run=True (default
+    seguro) nunca chama a API; a API só é chamada com decisão PERMITIDO E o gate
+    de dupla-env (HERMES_ALLOW_EXECUTE + GOOGLE_WORKSPACE_AXTRO_ENABLED) aberto.
+    """
+    all_recipients = ",".join([r for r in (to, cc, bcc) if r])
+    verdict = _share_policy.evaluate_recipients(all_recipients, approve_external=approve_external)
+    would_send = {"to": to, "cc": cc, "bcc": bcc, "subject": subject}
+
+    if verdict["decision"] == "BLOQUEADO":
+        return {"sent": False, "blocked": True, "verdict": verdict, **would_send}
+    if dry_run:
+        return {"sent": False, "dry_run": True, "would_send": would_send, "verdict": verdict}
+    gate = _share_policy.resolve_execution(dry_run_flag=False)
+    if gate["dry_run"]:
+        return {"sent": False, "dry_run": True, "gate_blocked": True,
+                "would_send": would_send, "gate": gate, "verdict": verdict}
+
     msg = EmailMessage()
     msg["To"] = to
     if cc:
@@ -42,7 +67,8 @@ def send_email(to: str, subject: str, body: str, cc: str = None, bcc: str = None
         msg.set_content(body)
 
     sent = auth.gmail().users().messages().send(userId="me", body=_raw(msg)).execute()
-    return {"id": sent.get("id"), "threadId": sent.get("threadId"), "to": to, "subject": subject}
+    return {"sent": True, "id": sent.get("id"), "threadId": sent.get("threadId"),
+            "to": to, "subject": subject}
 
 
 def _headers(msg: dict) -> dict:
@@ -137,6 +163,10 @@ def _cli():
     s.add_argument("--cc")
     s.add_argument("--bcc")
     s.add_argument("--html", action="store_true")
+    s.add_argument("--approve-external", action="store_true",
+                   help="marca aprovacao para destinatario externo (só vale com o dominio na allowlist de parceiros)")
+    s.add_argument("--execute", action="store_true", help="sai do dry-run (precisa das duas envs do gate)")
+    s.add_argument("--dry-run", action="store_true", help="forca dry-run (sempre vence)")
 
     l = sub.add_parser("list")
     l.add_argument("--max", type=int, default=10)
@@ -154,7 +184,12 @@ def _cli():
 
     args = p.parse_args()
     if args.cmd == "send":
-        out = send_email(args.to, args.subject, args.body, args.cc, args.bcc, args.html)
+        # Dry-run é o default: só sai dele com --execute E as duas envs do gate.
+        # --dry-run explícito sempre vence (resolvido dentro de send_email via gate).
+        dry_run = getattr(args, "dry_run", False) or not getattr(args, "execute", False)
+        out = send_email(args.to, args.subject, args.body, args.cc, args.bcc, args.html,
+                         approve_external=getattr(args, "approve_external", False),
+                         dry_run=dry_run)
     elif args.cmd == "list":
         out = list_recent(args.max, args.query)
     elif args.cmd == "search":

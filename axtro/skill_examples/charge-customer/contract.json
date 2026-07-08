@@ -1,0 +1,14 @@
+{
+  "id": "charge-customer",
+  "description": "Cobrança de cliente — EXEMPLO de skill BLOQUEADA sem aprovação humana.",
+  "enabled": true,
+  "production_ready": false,
+  "activation_stage": "staging",
+  "autonomy_ring": 3,
+  "risk_class": "financial_sensitive",
+  "stop_conditions": ["valor acima do limite", "fornecedor fora da allowlist"],
+  "telemetry_events": ["charge.attempt", "charge.blocked"],
+  "credentials": [],
+  "human_gates": ["HERMES_HUMAN_APPROVAL"],
+  "rollback": {"supported": true, "como": "estorno via provider em até 24h"}
+}

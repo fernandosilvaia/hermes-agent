@@ -70,7 +70,10 @@ Todos os scripts funcionam como **CLI** (jeito recomendado para o agente shell-o
 
 ```bash
 # Gmail
-python scripts/gmail.py send --to fulano@x.com --subject "Oi" --body "Corpo do email"
+# send é DRY-RUN por padrão e BLOQUEIA destinatários externos (mesmo gate do drive share,
+# ver "Segurança" abaixo): externo exige --approve-external + domínio em
+# GOOGLE_WORKSPACE_EXTERNAL_ALLOWED_DOMAINS, e a API só é chamada com --execute + as 2 envs.
+python scripts/gmail.py send --to colega@axtroai.com --subject "Oi" --body "Corpo do email"
 python scripts/gmail.py list --max 10
 python scripts/gmail.py search --query "from:cliente@x.com is:unread"
 python scripts/gmail.py read --id <MESSAGE_ID>
@@ -81,7 +84,12 @@ python scripts/drive.py list --max 20
 python scripts/drive.py find --name "proposta"
 python scripts/drive.py mkdir --name "Relatórios" --parent <FOLDER_ID>
 python scripts/drive.py upload --path ./arquivo.pdf --parent <FOLDER_ID>
-python scripts/drive.py share --id <FILE_ID> --email fulano@x.com --role writer
+# share é DRY-RUN por padrão e BLOQUEIA externos (ver "Segurança do share" abaixo).
+# O gate de ambiente (2 envs) vale para CLI E biblioteca: share_file(dry_run=False) sem
+# as envs também cai em dry-run (fail-closed).
+python scripts/drive.py share --id <FILE_ID> --email colega@axtroai.com --role writer
+# externo exige --approve-external E o domínio na env GOOGLE_WORKSPACE_EXTERNAL_ALLOWED_DOMAINS:
+python scripts/drive.py share --id <FILE_ID> --email parceiro@outro.com --approve-external --execute
 
 # Docs
 python scripts/docs.py create --title "Ata" --body "Texto..." --parent <FOLDER_ID>
@@ -120,6 +128,104 @@ python scripts/calendar_events.py cancel --id <EVENT_ID>
   tentar de novo mais tarde; não entrar em loop.
 - **Arquivo/ID inexistente** (`HttpError 404`) → confirmar o ID; para Drive, buscar por nome
   antes com `drive.py find`.
+
+## 🔒 Segurança de `share`, `send` e `create` (P0 — canal de exfiltração fechado)
+
+Num daemon 24/7 que lê emails/Telegram não-confiáveis, `drive.py share` era um canal
+de exfiltração: um prompt-injection podia mandar compartilhar um arquivo corporativo
+(até `role=writer`) com **qualquer** email externo, e o escopo do Drive é total. Fechado
+assim (lógica pura e testável em `scripts/_share_policy.py`):
+
+**1. Allowlist de domínio (`evaluate_share`).** Por padrão só o próprio domínio da
+empresa (`axtroai.com`) é "interno". Destinatário externo é **BLOQUEADO** sem aprovação
+explícita; `role=writer` para externo é bloqueado mesmo com aprovação implícita. Amplie a
+allowlist interna só via env `GOOGLE_WORKSPACE_SHARE_ALLOWED_DOMAINS` (csv de domínios).
+
+**1b. `--approve-external` NÃO é gate humano sozinho (anti-exfiltração).** A flag
+`--approve-external` / `approve_external` é setável pelo PRÓPRIO agente — logo, um
+prompt-injection também consegue setá-la. Por isso ela sozinha **não** libera um domínio
+arbitrário. Para um destino externo valer, o domínio precisa estar na env
+`GOOGLE_WORKSPACE_EXTERNAL_ALLOWED_DOMAINS` (csv de domínios de parceiros pré-aprovados),
+que **só o operador humano seta fora de banda**. Vazia por padrão → **nenhum** domínio
+externo é destino válido, nem com `--approve-external` e nem com as envs de execução
+ligadas. Isso fecha o vetor "auto-aprovar e exfiltrar para `attacker@evil-corp.com`".
+
+**2. Gate de dry-run (default PERMANENTE).** A chamada real à API do Drive só acontece se
+**todas** forem verdadeiras ao mesmo tempo:
+- o flag `--dry-run` **não** foi passado **e** `--execute` foi passado; **e**
+- env `HERMES_ALLOW_EXECUTE == "true"`; **e**
+- env `GOOGLE_WORKSPACE_AXTRO_ENABLED == "true"`.
+
+Faltando qualquer uma → **dry-run**: retorna um dict `{"dry_run": true, "would_share": {…}}`
+descrevendo o que faria, sem efeito real. `--dry-run` explícito **sempre vence** (o humano
+sempre pode forçar o modo seguro). Compartilhar com externo exige também `--approve-external`
+(gate humano).
+
+```bash
+# Interno, mas ainda dry-run (default) — só descreve, não compartilha:
+python scripts/drive.py share --id <FILE_ID> --email colega@axtroai.com
+# → {"shared": false, "dry_run": true, "would_share": {...}, "gate": {...}}
+
+# Externo sem aprovação — BLOQUEADO, nem chega na API:
+python scripts/drive.py share --id <FILE_ID> --email x@gmail.com --execute
+# → {"shared": false, "blocked": true, "verdict": {"decision":"BLOQUEADO", ...}}
+
+# Ação real (interno): precisa das DUAS envs ligadas + --execute:
+HERMES_ALLOW_EXECUTE=true GOOGLE_WORKSPACE_AXTRO_ENABLED=true \
+  python scripts/drive.py share --id <FILE_ID> --email colega@axtroai.com --role writer --execute
+
+# Ação real com externo aprovado por humano — o domínio do parceiro TEM que estar
+# na env de parceiros (setada fora de banda pelo operador); --approve-external sozinho não basta:
+HERMES_ALLOW_EXECUTE=true GOOGLE_WORKSPACE_AXTRO_ENABLED=true \
+  GOOGLE_WORKSPACE_EXTERNAL_ALLOWED_DOMAINS=outro.com \
+  python scripts/drive.py share --id <FILE_ID> --email parceiro@outro.com --approve-external --execute
+```
+
+Testes provando o furo fechado (rodam no `python3` do sistema, sem rede/credencial):
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+### ⚠️ Risco residual conhecido: escopo Drive total (não reduzir agora)
+
+`auth.py` usa o escopo **`https://www.googleapis.com/auth/drive`** (Drive inteiro), não o
+mais estrito `drive.file` (só arquivos criados/abertos pela app). Isso é um risco residual
+**aceito conscientemente**: reduzir para `drive.file` **quebraria `list`/`find`** — que leem
+o Drive corporativo e rodam em produção hoje. Portanto **não reduza o escopo agora** (quebra
+produção). Recomendação registrada: reavaliar uma **re-autorização** no admin do Google
+Workspace (escopos por serviço mais estreitos, ou uma segunda service account só-leitura para
+`list`/`find`) numa janela de manutenção com gate humano. Enquanto o escopo for total, a
+guarda-corpo do `share` acima é a mitigação principal do vetor de exfiltração.
+
+### ✅ Canais irmãos fechados: `gmail.py send` e `calendar_events.py create`
+
+Enviar email e convidar attendee (que dispara `sendUpdates="all"`) exfiltram dado
+corporativo tão bem quanto `drive.py share`. Os dois recebem **o mesmo padrão** acima,
+pelo mesmo `scripts/_share_policy.py`:
+
+- **dry-run por padrão + gate de dupla-env.** `send_email`/`create_event` são
+  `dry_run=True` por padrão e só chamam a API com `--execute` **e** `HERMES_ALLOW_EXECUTE=true`
+  **e** `GOOGLE_WORKSPACE_AXTRO_ENABLED=true` (`resolve_execution`). Vale para CLI **e**
+  biblioteca (fail-closed); criar evento sem attendees ainda respeita o gate por ser mutação.
+- **allowlist de destinatário externo.** Toda a lista `to`+`cc`+`bcc` (e os attendees do
+  evento) passa por `evaluate_recipients` **antes** da API: destinatário externo ao domínio
+  da empresa é **BLOQUEADO**, e `--approve-external` sozinho **não** basta — o domínio precisa
+  estar em `GOOGLE_WORKSPACE_EXTERNAL_ALLOWED_DOMAINS` (setada fora de banda por um humano).
+- **leituras seguem autônomas.** `gmail list`/`search`/`read`/`mark-read` e as leituras de
+  agenda (`today`/`range`/`list`) não são mutação e continuam livres.
+
+Provado por `tests/test_comms_gate.py` (pure + wiring por stub, sem rede/credencial):
+destinatário/attendee externo → **0 chamadas de API**; PERMITIDO porém dry-run → **0
+chamadas**; PERMITIDO + gate aberto → **exatamente 1 chamada**.
+
+### ⚠️ Risco residual conhecido: sem confirmação humana por-requisição
+
+Mesmo com a allowlist de parceiros, um domínio parceiro liberado permite que o agente
+compartilhe/mande para **qualquer** endereço daquele domínio sem um humano confirmar aquela
+requisição específica. O fechamento robusto pede uma aprovação **fora de banda** por
+requisição (ex.: confirmação do dono via Telegram com token que o agente não pode forjar).
+A allowlist de parceiros reduz o raio, mas não substitui essa confirmação. P0-restante.
 
 ## ⚠️ Ações irreversíveis — confirmar sempre
 

@@ -1,0 +1,52 @@
+{
+  "id": "google_workspace_axtro",
+  "name": "Google Workspace (Axtro)",
+  "owner_agent": "hermes",
+  "execution_location": "macbook",
+  "default_model": "haiku",
+  "autonomy_ring": 2,
+  "tools": ["terminal", "google-workspace-api"],
+  "credentials": ["GOOGLE_SERVICE_ACCOUNT_KEY_JSON"],
+  "max_daily_cost_usd": 0.1,
+  "inputs": [
+    "acao (gmail|drive|docs|sheets|slides|calendar)",
+    "parametros da acao (ids, emails, textos, ranges)",
+    "flags de gate: --approve-external, --execute, --dry-run"
+  ],
+  "outputs": [
+    "resultado_json_por_acao",
+    "veredito_de_share (decision, is_external, domain, role, reasons)",
+    "estado_do_gate (execute, dry_run, blockers)"
+  ],
+  "stop_conditions": [
+    "share e dry-run por PADRAO PERMANENTE: acao real so com --execute + HERMES_ALLOW_EXECUTE=true + GOOGLE_WORKSPACE_AXTRO_ENABLED=true; --dry-run explicito sempre vence",
+    "gate de execucao vale para CLI E biblioteca: share_file(dry_run=False) sem as duas envs cai em dry-run (fail-closed), nunca chama a API",
+    "compartilhar/emailar/convidar destinatario externo ao dominio da empresa e BLOQUEADO sem approve_external (gate humano) — vale para drive.share, gmail.send E calendar.create (canais irmaos do mesmo P0 de exfiltracao)",
+    "approve_external e setavel pelo agente, entao NAO basta: dominio externo so vale se estiver na env GOOGLE_WORKSPACE_EXTERNAL_ALLOWED_DOMAINS (setada fora de banda por humano); allowlist vazia = nenhum externo",
+    "conceder role=writer a destinatario externo e BLOQUEADO sem approve_external",
+    "email/attendee malformado ou sem dominio valido e BLOQUEADO antes de qualquer chamada de API",
+    "gmail.send e calendar.create seguem o MESMO gate de dry-run + evaluate_recipients que drive.share; criar evento sem attendees ainda respeita o gate de execucao (dry-run default)",
+    "skill nunca deleta arquivos do Drive nem apaga emails permanentemente",
+    "nunca logar nem retornar o conteudo de GOOGLE_SERVICE_ACCOUNT_KEY_JSON",
+    "escopo Drive total (https://www.googleapis.com/auth/drive) e risco residual conhecido — ver SKILL.md"
+  ],
+  "telemetry_events": [
+    "google_workspace_axtro.share.blocked",
+    "google_workspace_axtro.share.dry_run",
+    "google_workspace_axtro.share.executed",
+    "google_workspace_axtro.send.blocked",
+    "google_workspace_axtro.event.blocked",
+    "google_workspace_axtro.auth.error"
+  ],
+  "human_gates": [
+    "compartilhar com dominio externo (drive)",
+    "enviar email para destinatario externo (gmail)",
+    "convidar attendee externo (calendar)",
+    "conceder role=writer",
+    "executar qualquer acao mutante real (passar --execute com as duas envs do gate ligadas)"
+  ],
+  "enabled": false,
+  "production_ready": false,
+  "activation_stage": "staging",
+  "notes": "staging: P0 de exfiltracao fechado nos TRES canais — drive.share, gmail.send e calendar.create — via _share_policy.py (evaluate_share/evaluate_recipients + resolve_execution) e gate dry-run de dupla-env. Testes: test_share_policy.py (puro) + test_drive_share_gate.py + test_comms_gate.py (stubs, provam 0 chamadas de API em bloqueio/dry-run e 1 chamada so quando PERMITIDO+gate aberto). Leituras (list/find/read/whoami/health) seguem autonomas. Ativacao em producao e ato humano: setar HERMES_ALLOW_EXECUTE e GOOGLE_WORKSPACE_AXTRO_ENABLED; para destino externo, tambem GOOGLE_WORKSPACE_EXTERNAL_ALLOWED_DOMAINS. Risco residual: docs/sheets/slides create (arquivos internos, sem comunicacao externa) ainda nao tem gate de dry-run — baixo risco, listado no SECURITY_FIX_REPORT."
+}

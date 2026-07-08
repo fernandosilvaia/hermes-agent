@@ -1,0 +1,19 @@
+# Skills GOVERNADAS pela Axtro — o contract_guard só bloqueia/limita estas.
+# Tudo que NÃO está aqui é tratado como skill nativa da Nous → PASS-THROUGH
+# (nunca bloqueada; não é nosso lugar governar as ~68 nativas).
+#
+# Uma skill listada aqui SEM contract.json é "legacy Axtro sensível" e tem a
+# ação real bloqueada até ganhar um contract (regra R1).
+#
+# Caminhos relativos à raiz do repo. Linhas com # e vazias são ignoradas.
+skills/productivity/google-workspace-axtro
+skills/communication/telnyx-voice-sms
+skills/productivity/ask-vps-hermes
+skills/finance/hermes-purchase
+skills/operations/project-status-auditor
+skills/productivity/axtro-factory-monitor
+
+# --- Exemplos do Autonomy Core (demonstração; seguros, governados p/ o Fernando testar) ---
+axtro/skill_examples/safe-diagnostic
+axtro/skill_examples/charge-customer
+axtro/skill_examples/prepare-prod-change

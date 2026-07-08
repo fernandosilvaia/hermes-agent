@@ -35,11 +35,16 @@ import base64
 import json
 import os
 import re
+import sys
 import time
 from datetime import datetime, timezone
 
 import requests
 from fastapi import FastAPI, Header, HTTPException, Request
+
+# Política PURA (stdlib only) — máscara de OTP + verificação de token do inbox.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _sms_policy import extract_bearer, mask_otp, require_token  # noqa: E402
 
 # PyNaCl para verificação Ed25519
 try:
@@ -329,8 +334,25 @@ def health():
 
 
 @app.get("/sms/last")
-def last_sms():
-    """Retorna o último SMS recebido (para o agente responder 'chegou algum SMS?')."""
+def last_sms(authorization: str = Header(None)):
+    """Retorna o último SMS recebido — AUTENTICADO e com OTP MASCARADO.
+
+    P0 fechado: este endpoint sobe em 0.0.0.0 atrás do Caddy público. Sem auth ele
+    devolvia o último SMS COM o verification_code (OTP/2FA) em claro. Agora:
+      - exige `Authorization: Bearer <TELNYX_INBOX_API_KEY>`;
+      - sem a env configurada -> 503 (nunca abre sem auth);
+      - token errado/ausente -> 401;
+      - a resposta HTTP passa por mask_otp (o arquivo local pode manter o código cru,
+        a resposta pela rede nunca devolve OTP em claro).
+    """
+    expected = (os.environ.get("TELNYX_INBOX_API_KEY", "") or "").strip()
+    if not expected:
+        # Fail-closed: sem chave configurada, o endpoint não abre.
+        raise HTTPException(503, "auth do inbox não configurada (TELNYX_INBOX_API_KEY ausente).")
+    provided = extract_bearer(authorization)
+    if not require_token(provided, expected):
+        raise HTTPException(401, "token do inbox inválido ou ausente.")
+
     if not os.path.isfile(SMS_INBOX_PATH):
         return {"message": "nenhum SMS recebido ainda"}
     last = None
@@ -339,7 +361,9 @@ def last_sms():
             line = line.strip()
             if line:
                 last = line
-    return json.loads(last) if last else {"message": "nenhum SMS recebido ainda"}
+    if not last:
+        return {"message": "nenhum SMS recebido ainda"}
+    return mask_otp(json.loads(last))
 
 
 if __name__ == "__main__":

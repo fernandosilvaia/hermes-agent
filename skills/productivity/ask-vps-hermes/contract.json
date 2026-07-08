@@ -1,0 +1,30 @@
+{
+  "id": "ask_vps_hermes",
+  "name": "Ask VPS Hermes (Bridge)",
+  "owner_agent": "hermes",
+  "execution_location": "macbook",
+  "default_model": "none",
+  "autonomy_ring": 2,
+  "tools": ["network:hermes_vps"],
+  "credentials": ["HERMES_VPS_API_SERVER_KEY"],
+  "max_daily_cost_usd": 0.5,
+  "inputs": ["task_type (allowlist: consultar|resumir|status)", "message (consulta de leitura)"],
+  "outputs": ["relay_plan_json", "envelope_read_only", "vps_response (só quando execução liberada)"],
+  "stop_conditions": [
+    "só repassa consulta de leitura; nunca instrução de ação",
+    "task_type fora do allowlist {consultar,resumir,status} -> BLOQUEADO, sem tocar na VPS",
+    "mensagem com marker de ação de efeito real ou prompt-injection -> BLOQUEADO",
+    "dry-run é o default permanente; POST real só com --execute + HERMES_ALLOW_EXECUTE=true + ASK_VPS_HERMES_ENABLED=true",
+    "--dry-run explícito sempre vence, mesmo com as duas envs setadas",
+    "nunca faz passthrough cru — sempre envolve a consulta num envelope read-only com preâmbulo de recusa de ação",
+    "nunca loga nem retorna a HERMES_VPS_API_SERVER_KEY em texto cru"
+  ],
+  "telemetry_events": ["ask_vps_hermes.relay.decision"],
+  "human_gates": [
+    "delegar ação de efeito real à VPS (email/SMS/ligação/compartilhamento/compra)"
+  ],
+  "enabled": false,
+  "production_ready": false,
+  "activation_stage": "staging",
+  "notes": "staging: P0 prompt-injection fechado. Ponte só relaya consulta de leitura, sempre em envelope read-only, com gate de dry-run triplo. Ativação em produção é ato humano (setar as duas envs)."
+}

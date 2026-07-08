@@ -1,0 +1,14 @@
+{
+  "id": "prepare-prod-change",
+  "description": "Prepara mudança de produção — EXEMPLO production_sensitive que exige gate humano.",
+  "enabled": true,
+  "production_ready": false,
+  "activation_stage": "staging",
+  "autonomy_ring": 3,
+  "risk_class": "production_sensitive",
+  "stop_conditions": ["migração destrutiva", "sem backup"],
+  "telemetry_events": ["prod.prepare", "prod.blocked"],
+  "credentials": [],
+  "human_gates": ["HERMES_HUMAN_APPROVAL"],
+  "rollback": {"supported": true, "como": "git revert do PR / restore do backup"}
+}

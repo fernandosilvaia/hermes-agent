@@ -45,18 +45,43 @@ o `config.example.json` é o template versionado.
 python scripts/policy.py --vendor "OpenRouter" --amount 120
 python scripts/policy.py --status                     # orçamento restante do mês
 
-# 2. Preparar um pedido de aprovação (registra como 'pendente', opcional envia no Telegram)
+# 2. Preparar um pedido de aprovação (registra como 'pendente'; o approval-token
+#    vai SÓ para o seu Telegram — o daemon nunca o vê no stdout)
 python scripts/request_purchase.py request \
     --vendor "OpenRouter" --amount 120 \
     --reason "recarga do teto do briefing" --notify
 
-# 3. Depois que VOCÊ aprovar/pagar fora do agente, registrar o desfecho:
-python scripts/request_purchase.py confirm --id 20260706-2130-a1b2 --status aprovada
-python scripts/request_purchase.py confirm --id 20260706-2130-a1b2 --status recusada
+# 3. Aprovar (ato HUMANO, fora do daemon). Exige o token que chegou no seu Telegram
+#    E a env humana HERMES_PURCHASE_ALLOW_CONFIRM=true (que NÃO vive no ambiente do daemon):
+HERMES_ALLOW_EXECUTE=true HERMES_PURCHASE_ALLOW_CONFIRM=true \
+  python scripts/request_purchase.py confirm \
+    --id 20260706-2130-a1b2 --status aprovada \
+    --approval-token <TOKEN-QUE-CHEGOU-NO-TELEGRAM>
 
-# 4. Auditoria
+# preview seguro (nunca altera nada; --dry-run sempre vence):
+python scripts/request_purchase.py confirm --id 20260706-2130-a1b2 --status aprovada --dry-run
+
+# 4. Auditoria (list mascara o hash; toda tentativa também vira linha em audit.log)
 python scripts/request_purchase.py list --month 2026-07
 ```
+
+## Enforcement do gate humano (P0 fechado)
+
+O `confirm` deixou de ser convenção e virou **enforcement real**. Confirmar de
+verdade (o que libera o teto mensal) só acontece com **todos** estes ao mesmo tempo:
+
+1. `--approval-token <TOKEN>` conferindo (`hmac.compare_digest`) com o **hash sha256**
+   gravado no ledger. O token cru **só** foi entregue no Telegram do dono — o daemon
+   vê apenas o hash, nunca o token, e o token nunca aparece no stdout.
+2. Env humana `HERMES_PURCHASE_ALLOW_CONFIRM=true`, que deve viver **fora** do ambiente
+   do daemon (é ligada só na sessão humana que aprova).
+3. Gate padrão de execução: **sem** `--dry-run` + `HERMES_ALLOW_EXECUTE=true`.
+   `--dry-run` explícito **sempre vence** (o humano pode forçar o modo seguro).
+
+Falta qualquer segredo humano → **recusa** (exit ≠ 0) e a tentativa é logada. Assim o
+daemon não consegue se auto-aprovar — nem se vazar o hash, porque precisa do token cru
+(só no Telegram) **e** da env humana. Toda tentativa (sucesso, recusa ou dry-run) vira
+linha append-only em `audit.log`, sempre sem o token cru (só prefixo do hash).
 
 ## Estados de uma compra no livro-caixa
 

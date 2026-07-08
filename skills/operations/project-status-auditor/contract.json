@@ -15,5 +15,9 @@
     "repo/dir inválido vira flag 'erro' e a varredura continua nos demais",
     "zero credencial — não acessa rede a não ser telemetria best-effort opcional"
   ],
-  "telemetry_events": ["project_status_auditor.run"]
+  "telemetry_events": ["project_status_auditor.run"],
+  "enabled": false,
+  "production_ready": false,
+  "activation_stage": "staging",
+  "notes": "staging: 11 testes verdes + smoke real contra 01_CLIENTES (17 repos). Ativação em produção é ato humano."
 }

@@ -1,0 +1,57 @@
+{
+  "id": "telnyx_voice_sms",
+  "name": "Telnyx · Voz + SMS",
+  "owner_agent": "hermes",
+  "execution_location": "vps",
+  "default_model": "haiku",
+  "autonomy_ring": 2,
+  "tools": ["terminal", "telnyx_api", "webhook_server"],
+  "credentials": [
+    "TELNYX_API_KEY",
+    "TELNYX_CONNECTION_ID",
+    "TELNYX_INBOX_API_KEY",
+    "TELNYX_PUBLIC_KEY",
+    "TELNYX_NUMBER"
+  ],
+  "max_daily_cost_usd": 2,
+  "inputs": [
+    "to (E.164)",
+    "text (SMS) / message (TTS da ligação)",
+    "dry_run (default true)",
+    "reveal (default false, só p/ OTP com gate aberto)"
+  ],
+  "outputs": [
+    "plano_dry_run_json",
+    "resultado_envio_json",
+    "ultimo_sms_mascarado",
+    "codigo_verificacao_mascarado"
+  ],
+  "stop_conditions": [
+    "envio/ligação reais SÓ com --dry-run ausente E HERMES_ALLOW_EXECUTE=true E TELNYX_VOICE_SMS_ENABLED=true (o padrão permanente é dry-run)",
+    "destino fora da allowlist (default: só o próprio número TELNYX_NUMBER/+16174505166) é BLOQUEADO, mesmo com o gate aberto",
+    "teto diário de envios (TELNYX_DAILY_SEND_CAP, default 10) atingido -> BLOQUEADO",
+    "GET /sms/last exige Authorization: Bearer TELNYX_INBOX_API_KEY; sem a env -> 503; token errado -> 401; nunca abre sem auth",
+    "OTP/verification_code nunca sai em claro pela HTTP ou pela CLI — sempre mascarado; --reveal só com o gate humano aberto",
+    "TELNYX_API_KEY e demais segredos nunca são logados nem retornados"
+  ],
+  "telemetry_events": [
+    "telnyx_voice_sms.sms_planned",
+    "telnyx_voice_sms.sms_sent",
+    "telnyx_voice_sms.sms_blocked",
+    "telnyx_voice_sms.call_planned",
+    "telnyx_voice_sms.call_sent",
+    "telnyx_voice_sms.inbox_read",
+    "telnyx_voice_sms.sms_last_auth_denied"
+  ],
+  "human_gates": [
+    "enviar SMS a terceiro (destino fora da allowlist do próprio número)",
+    "ligar para terceiro (destino fora da allowlist do próprio número)",
+    "revelar OTP/2FA em claro (--reveal)",
+    "ampliar a allowlist de destinatários (TELNYX_ALLOWED_RECIPIENTS)",
+    "expor o webhook_server publicamente / configurar TELNYX_INBOX_API_KEY"
+  ],
+  "enabled": false,
+  "production_ready": false,
+  "activation_stage": "staging",
+  "notes": "staging: P0 fechado (auth+máscara no /sms/last; gate dry-run+allowlist+teto em send/call). Ativação em produção (setar HERMES_ALLOW_EXECUTE, TELNYX_VOICE_SMS_ENABLED, TELNYX_INBOX_API_KEY e ampliar allowlist) é ato humano. Testes puros verdes sem rede."
+}
