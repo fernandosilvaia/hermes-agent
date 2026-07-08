@@ -48,13 +48,27 @@ def _read_all() -> list:
     return out
 
 
-def recent_sms(n: int = 5) -> list:
-    return _read_all()[-n:][::-1]  # mais recentes primeiro
+def recent_sms(n: int = 5, reveal: bool = False) -> list:
+    """Últimos N SMS, mais recentes primeiro. OTP MASCARADO por padrão também na
+    via de BIBLIOTECA (o daemon importa esta função direto). `reveal=True` só devolve
+    em claro com o gate humano aberto (reveal_allowed); senão mascara."""
+    recs = _read_all()[-n:][::-1]
+    if reveal and reveal_allowed():
+        return recs
+    return [mask_otp(r) for r in recs]
 
 
-def last_sms() -> dict:
+def last_sms(reveal: bool = False) -> dict:
+    """Último SMS recebido. OTP MASCARADO por padrão também na via de BIBLIOTECA —
+    antes, last_sms() de biblioteca vazava o código 2FA cru (a máscara só existia no
+    CLI). `reveal=True` só revela com o gate humano aberto (reveal_allowed)."""
     allm = _read_all()
-    return allm[-1] if allm else {"message": "nenhum SMS recebido ainda"}
+    if not allm:
+        return {"message": "nenhum SMS recebido ainda"}
+    rec = allm[-1]
+    if reveal and reveal_allowed():
+        return rec
+    return mask_otp(rec)
 
 
 def last_code(reveal: bool = False) -> dict:
@@ -96,12 +110,12 @@ def _cli():
     args = p.parse_args()
     reveal = bool(args.reveal) and reveal_allowed()
 
+    # As funções de biblioteca já mascaram por padrão e só revelam com o gate
+    # aberto — o CLI delega a elas (fonte única), sem re-mascarar.
     if args.cmd == "last":
-        rec = last_sms()
-        out = rec if reveal else mask_otp(rec)
+        out = last_sms(reveal=bool(args.reveal))
     elif args.cmd == "recent":
-        recs = recent_sms(args.n)
-        out = recs if reveal else [mask_otp(r) for r in recs]
+        out = recent_sms(args.n, reveal=bool(args.reveal))
     elif args.cmd == "code":
         out = last_code(reveal=bool(args.reveal))
 
