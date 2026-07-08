@@ -17,8 +17,9 @@
 | `axtro/contract_guard.py` | Biblioteca PURA de decisão. `evaluate(contract, env)` aplica as regras R1..R9 e devolve `{allow_real, max_mode, reasons}`. Sem rede, sem I/O (exceto `load_contract` opcional). |
 | `axtro/GOVERNED_SKILLS.txt` | Allowlist explícita das skills **Axtro**. Só estas são governadas; tudo fora é nativo Nous → pass-through. |
 | `axtro/tools/scan_contracts.py` | Scanner: aplica o guard em todas as skills e reporta estado (governada/nativa, liberada/bloqueada, modo). Torna o enforcement visível. |
-| `axtro/tools/contract_preflight.py` | **O gate de runtime.** O daemon/worker chama antes de deixar uma skill governada agir: exit 0 = autorizada; exit 10 = bloqueada. Fail-closed. |
-| `axtro/tests/test_contract_guard.py` + `test_preflight.py` | 21 testes cobrindo cada regra + os exit codes do preflight. |
+| `axtro/tools/contract_preflight.py` | **O gate de runtime.** O daemon/worker chama antes de deixar uma skill governada agir: exit 0 = autorizada; exit 10 = bloqueada. Fail-closed. Expõe `preflight_decision()` (modo estruturado) além de `preflight()` (compat, exit code). |
+| `axtro/skill_runner.py` | **O chokepoint de execução.** `run_skill()` chama o preflight ANTES de criar o processo do script — se bloquear, o subprocess NUNCA é spawned. É o ponto único por onde o daemon executa skill governada. (ver addendum de prova end-to-end) |
+| `axtro/tests/test_contract_guard.py` + `test_preflight.py` + `test_skill_runner_e2e.py` | 28 testes: cada regra do guard, os exit codes do preflight, e a prova end-to-end (script real não roda quando bloqueado). |
 
 ---
 
@@ -72,10 +73,11 @@ O gate efetivo de uma ação real passa a ser:
 ação_real = preflight_autoriza(skill)  AND  gate_de_dupla_env_no_script
 ```
 
-**Camada 1 — preflight (novo, esta entrega):** o daemon/worker executa
-`contract_preflight.py <skill_dir>` antes de rodar uma skill governada. Exit 10 →
-não executa. Este é o ponto onde `contract.json` deixa de ser documentação: um
-processo real, com exit code, decide.
+**Camada 1 — chokepoint de execução (`skill_runner.run_skill`):** o daemon executa
+o script de uma skill governada SÓ por aqui; o runner chama o preflight e, se
+bloquear, **o subprocess do script nunca é criado**. Este é o ponto onde
+`contract.json` deixa de ser documentação: uma decisão real, antes do processo,
+decide. Provado end-to-end no addendum abaixo.
 
 **Camada 2 — gate de dupla-env no script (já existia):** defesa em profundidade;
 mesmo que a camada 1 seja pulada, cada skill corrigida ainda exige
@@ -87,7 +89,70 @@ não uma reescrita do core Nous — as nativas continuam passando direto.
 
 ---
 
-## O que foi DELIBERADAMENTE deixado para follow-up (honestidade)
+## Addendum 2026-07-08 — Prova end-to-end do chokepoint
+
+> A versão anterior deste report marcou como follow-up "conectar o preflight no
+> wrapper de execução do daemon". **Esse gap foi fechado.** `axtro/skill_runner.py`
+> é o wrapper, e há prova end-to-end de que uma skill governada bloqueada tem o
+> script **nunca criado** — não é auto-referência.
+
+### Como a prova é real (não vacuosa)
+Cada skill-fixture tem um script REAL que, **se rodar**, escreve um arquivo-marcador
+em disco. Ausência do marcador = o script nunca rodou. Nos casos que devem
+bloquear, o teste injeta um `spawn` que **levanta exceção se for chamado** — se o
+runner tentar criar o processo, o teste explode. Nos casos que devem rodar, usa o
+`subprocess.run` real e lê o que o script viu (stage, allow_execute).
+
+### Os 5 critérios → teste (`axtro/tests/test_skill_runner_e2e.py`, 7 testes, verdes)
+
+| Critério | Teste | Resultado |
+|---|---|---|
+| governada `enabled=false` bloqueia **antes** do script rodar | `test_governed_disabled_blocks_before_script_runs` | `blocked=True`, marcador ausente, spawn nunca chamado |
+| governada **sem** contract.json bloqueia | `test_governed_without_contract_blocks` | `blocked=True` (R1 legacy sensível), marcador ausente |
+| nativa Nous passa sem quebrar | `test_native_nous_skill_passthrough_runs` | `mode=passthrough`, rodou, marcador presente |
+| `enabled=true` + `production_ready=false` → só staging | `test_enabled_but_not_prod_runs_only_in_staging` | rodou, `stage=staging`, `HERMES_ALLOW_EXECUTE` removido pelo runner (nunca produção) |
+| `autonomy_ring>=2` exige gate explícito | `test_ring2_blocks_without_gate` / `test_ring2_runs_with_explicit_gate` | sem gate → bloqueado, marcador ausente; com `HERMES_RING_GATE=true` → rodou |
+| ponte com a realidade | `test_real_governed_skills_are_blocked_via_runner` | hermes-purchase / google-workspace-axtro / ask-vps-hermes reais → todos `blocked`, nenhum spawn |
+
+### Controle negativo (o preflight é a peça que bloqueia)
+Rodando a mesma fixture `enabled=false` com o runner normal vs. um runner com o
+preflight burlado (monkeypatch → sempre allow):
+
+```
+normal:   blocked=True  ran=False  marker_exists=False
+bypass:   blocked=False ran=True   marker_exists=True
+```
+
+Ou seja: **com** preflight o script não roda; **sem** preflight, roda e cria o
+marcador. O preflight é load-bearing.
+
+### Evidência via CLI (exit code real)
+```
+$ python3 axtro/tools/contract_preflight.py skills/finance/hermes-purchase
+BLOQUEADA: skills/finance/hermes-purchase — R3: enabled != true …           exit=10
+
+$ python3 axtro/tools/contract_preflight.py skills/apple/apple-notes
+PASSTHROUGH: skill nativa (nao governada pela Axtro): skills/apple/apple-notes  exit=0
+
+$ python3 axtro/skill_runner.py skills/finance/hermes-purchase \
+      scripts/request_purchase.py request --vendor X --amount 1
+hermes-purchase: ran=False mode=blocked — BLOQUEADA … R3: enabled != true    exit=10
+```
+O `request_purchase.py` não produziu nenhuma saída — não foi executado.
+
+### O limite honesto (o que a prova NÃO afirma)
+A garantia "qualquer execução passa pelo preflight" vale **para toda execução
+roteada por `run_skill`**. Rodar o script direto no shell burlaria este runner —
+como burlaria qualquer wrapper. Por isso a **defesa em profundidade** continua: o
+gate de dupla-env dentro de cada script (`HERMES_ALLOW_EXECUTE` + `<SKILL>_ENABLED`)
+sozinho já bloqueia ação real mesmo num bypass (163 testes da Parte 1). Ação real
+efetiva = `run_skill` autoriza **E** gate no script. Para elevar a garantia a "o
+daemon SÓ executa skill por aqui", o dispatch de skill do runtime Nous precisa
+chamar `run_skill` — ponto de integração nomeado; o runner já está pronto para isso.
+
+---
+
+## O que ainda fica para follow-up (honestidade)
 
 **Fiação do guard dentro de cada script de skill (defesa em profundidade mais funda).**
 Poderia adicionar, no gate de cada skill, um `and contract_guard.contract_allows_real(SKILL_DIR, env)`
@@ -118,10 +183,13 @@ fazer skill por skill, rodando os testes a cada uma.
 ## Validação executada
 
 ```
-✅ python3 -m unittest discover -s axtro/tests   → 21/21 (16 guard + 5 preflight)
+✅ python3 -m unittest discover -s axtro/tests   → 28/28 (16 guard + 5 preflight + 7 e2e)
 ✅ python3 axtro/tools/scan_contracts.py         → 6 governadas todas bloqueadas, 71 nativas pass-through
 ✅ preflight: hermes-purchase → exit 10 (R3); apple-notes → exit 0 (passthrough);
    axtro-factory-monitor → exit 10 (R1 legacy); path inválido → não-governado
+✅ e2e: skill governada bloqueada → script NUNCA spawned (marcador ausente + spy que explode)
+✅ controle negativo: burlar o preflight faz o script disabled rodar → preflight é load-bearing
+✅ skill_runner CLI: request_purchase real → ran=False, exit 10 (script não executou)
 ✅ as 4 skills corrigidas seguem 100% verdes (não tocadas nesta parte)
 ✅ nenhuma produção tocada, nenhum secret usado, read-only
 ```
