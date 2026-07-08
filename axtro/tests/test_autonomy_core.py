@@ -117,6 +117,26 @@ class AutonomyCoreTest(unittest.TestCase):
         self.assertFalse(out["cobranca_real"], "cobrança real jamais sem gate")
         self.assertFalse(charged.exists())
 
+    # ── regressão red-team 2b: skill sensível FORA da allowlist + gates ──
+    def test_pathescape_sensitive_no_real_action_via_runner(self):
+        src = EX / "charge-customer"
+        d = self.tmp / "ungoverned-charge"      # fora da allowlist → pass-through
+        (d / "scripts").mkdir(parents=True)
+        (d / "contract.json").write_text((src / "contract.json").read_text(encoding="utf-8"),
+                                         encoding="utf-8")
+        (d / "scripts" / "charge.py").write_text(
+            (src / "scripts" / "charge.py").read_text(encoding="utf-8"), encoding="utf-8")
+        charged = self.tmp / "charged.marker"
+        # o agente tenta setar TODOS os gates; o runner (pass-through) remove ALLOW_EXECUTE
+        r = sr.run_skill(d, ["scripts/charge.py"],
+                         env={"HERMES_ALLOW_EXECUTE": "true", "CHARGE_ENABLED": "true",
+                              "HERMES_HUMAN_APPROVAL": "true",
+                              "HERMES_CHARGED_MARKER": str(charged)},
+                         spawn=_Rec(), log_path=str(self.logf))
+        self.assertEqual(r.mode, "passthrough")
+        self.assertFalse(charged.exists(),
+                         "pass-through NÃO pode encaminhar HERMES_ALLOW_EXECUTE (achado 2b)")
+
     # ── logs + relatório ─────────────────────────────────────────────────
     def test_execution_is_logged_and_reported(self):
         r = sr.run_skill(EX / "safe-diagnostic", ["scripts/run.py"], env={},

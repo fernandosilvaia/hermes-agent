@@ -23,8 +23,10 @@ Modos aplicados ao spawnar:
   - blocked/killed → NÃO spawna (fail-closed).
   - dry_run        → spawna forçando `--dry-run`, sem HERMES_ALLOW_EXECUTE (simula).
   - staging        → spawna com HERMES_STAGE=staging, sem HERMES_ALLOW_EXECUTE.
-  - production     → spawna com HERMES_STAGE=production (gate no script ainda vale).
-  - passthrough    → skill nativa: spawna como veio (não governamos as nativas).
+  - production     → spawna com HERMES_STAGE=production (único modo que encaminha
+                     HERMES_ALLOW_EXECUTE; só safe/medium chegam aqui).
+  - passthrough    → skill nativa: spawna como veio, mas SEM HERMES_ALLOW_EXECUTE
+                     (nativa Nous não usa esse gate; fecha o path-escape 2b).
 
 100% stdlib. `subprocess.run` é injetável via `spawn=` para teste (provar que o
 processo não é criado quando bloqueado).
@@ -112,17 +114,21 @@ def run_skill(skill_dir, script_argv, env=None, *, is_governed=None, spawn=None,
     # ── aplica a restrição de modo ────────────────────────────────────────
     run_env = dict(base_env)
     argv = list(script_argv)
+    # O runner só concede o gate de execução do daemon (HERMES_ALLOW_EXECUTE) em
+    # PRODUÇÃO governada. Em QUALQUER outro modo ele é REMOVIDO — assim uma skill
+    # sensível fora da allowlist (pass-through) não consegue ação real via runner,
+    # mesmo que o agente tente setar o gate. (Achado do red-team, ataque 2b.)
+    if d.mode != "production":
+        run_env.pop("HERMES_ALLOW_EXECUTE", None)
     if d.mode == "dry_run":
         run_env["HERMES_STAGE"] = "dry_run"
-        run_env.pop("HERMES_ALLOW_EXECUTE", None)
         if "--dry-run" not in argv:
             argv = argv + ["--dry-run"]
     elif d.mode == "staging":
         run_env["HERMES_STAGE"] = "staging"
-        run_env.pop("HERMES_ALLOW_EXECUTE", None)  # produção nunca liberada aqui
     elif d.mode == "production":
         run_env["HERMES_STAGE"] = "production"
-    # passthrough (nativa) → sem restrição.
+    # passthrough (nativa) → roda como veio, mas SEM ALLOW_EXECUTE encaminhado.
 
     cmd = _resolve_cmd(sdir, argv)
     proc = spawn(cmd, cwd=str(sdir), env=run_env)
