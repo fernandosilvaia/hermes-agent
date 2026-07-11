@@ -11,7 +11,8 @@
     "TELNYX_CONNECTION_ID",
     "TELNYX_INBOX_API_KEY",
     "TELNYX_PUBLIC_KEY",
-    "TELNYX_NUMBER"
+    "TELNYX_NUMBER",
+    "HOUSE_INGEST_TOKEN (só p/ consume_tenant_calls.py — mesmo token de máquina do MacBook Worker/dispatch-job)"
   ],
   "max_daily_cost_usd": 2,
   "inputs": [
@@ -32,7 +33,8 @@
     "teto diário de envios (TELNYX_DAILY_SEND_CAP, default 10) atingido -> BLOQUEADO",
     "GET /sms/last exige Authorization: Bearer TELNYX_INBOX_API_KEY; sem a env -> 503; token errado -> 401; nunca abre sem auth",
     "OTP/verification_code nunca sai em claro pela HTTP ou pela CLI — sempre mascarado; --reveal só com o gate humano aberto",
-    "TELNYX_API_KEY e demais segredos nunca são logados nem retornados"
+    "TELNYX_API_KEY e demais segredos nunca são logados nem retornados",
+    "consume_tenant_calls.py (ligação TENANT-SCOPED, ver seção dedicada no SKILL.md): só processa job executor=='telnyx-call' já aprovado por humano no Control Tower (requires_human_gate=true + result.approved_by, reconfirmado LOCALMENTE por _tenant_call_policy.validate_job_gate — nunca confia cego no que veio da rede); a credencial Telnyx usada é SEMPRE a da conta PRÓPRIA do tenant (org_integrations no Control Tower), nunca TELNYX_API_KEY/TELNYX_NUMBER globais desta skill; ligação real só com HERMES_ALLOW_EXECUTE=true E TENANT_TELNYX_CALLS_ENABLED=true (flag PRÓPRIA, independente de TELNYX_VOICE_SMS_ENABLED — ligar uma não liga a outra); credencial resolvida via endpoint de USO ÚNICO (POST /api/hermes/jobs/:id/telnyx-credential) — nunca fica em texto puro na fila de jobs, nem pode ser relida duas vezes"
   ],
   "telemetry_events": [
     "telnyx_voice_sms.sms_planned",
@@ -41,14 +43,17 @@
     "telnyx_voice_sms.call_planned",
     "telnyx_voice_sms.call_sent",
     "telnyx_voice_sms.inbox_read",
-    "telnyx_voice_sms.sms_last_auth_denied"
+    "telnyx_voice_sms.sms_last_auth_denied",
+    "telnyx_voice_sms.tenant_call_done",
+    "telnyx_voice_sms.tenant_call_blocked"
   ],
   "human_gates": [
     "enviar SMS a terceiro (destino fora da allowlist do próprio número)",
     "ligar para terceiro (destino fora da allowlist do próprio número)",
     "revelar OTP/2FA em claro (--reveal)",
     "ampliar a allowlist de destinatários (TELNYX_ALLOWED_RECIPIENTS)",
-    "expor o webhook_server publicamente / configurar TELNYX_INBOX_API_KEY"
+    "expor o webhook_server publicamente / configurar TELNYX_INBOX_API_KEY",
+    "toda ligação tenant-scoped (consume_tenant_calls.py): aprovação humana REAL no Control Tower (POST /api/hermes/jobs/:id/approve, isHumanAuthorized — nunca a credencial de máquina que cria o job) ANTES de qualquer tentativa de discagem, sem exceção"
   ],
   "enabled": false,
   "production_ready": false,

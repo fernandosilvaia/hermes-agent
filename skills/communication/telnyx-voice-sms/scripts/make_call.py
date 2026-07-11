@@ -36,6 +36,16 @@ Env necessárias:
     TELNYX_WEBHOOK_URL      (opcional aqui se já configurado no App; recomendado passar)
     TELNYX_ALLOWED_RECIPIENTS  (opcional; CSV E.164 de destinos extras permitidos)
     HERMES_ALLOW_EXECUTE / TELNYX_VOICE_SMS_ENABLED  (gate p/ ligação real)
+
+CREDENCIAIS POR PARÂMETRO (multi-tenant, ver skills/communication/telnyx-voice-sms/
+scripts/consume_tenant_calls.py): make_call() já aceitava `env` pra sobrescrever a
+allowlist/gate/teto por chamada (repassado a _send_policy.plan_action), mas
+_api_key() ainda lia TELNYX_API_KEY direto de os.environ, ignorando esse `env` —
+então uma chamada tenant-scoped (credencial de outra conta Telnyx, resolvida em
+tempo de execução, nunca em os.environ do processo) não tinha como sobrescrever
+a API key de verdade. Fix mínimo e retrocompatível: _api_key(env) aceita o mesmo
+dict `env`, com fallback pro os.environ real quando omitido — chamadas
+existentes (CLI, uso interno da Axtro sem passar `env`) continuam idênticas.
 """
 from __future__ import annotations
 
@@ -60,8 +70,9 @@ TELNYX_CALLS_API = "https://api.telnyx.com/v2/calls"
 DEFAULT_FROM = os.environ.get("TELNYX_NUMBER", "+16174505166")
 
 
-def _api_key() -> str:
-    key = os.environ.get("TELNYX_API_KEY")
+def _api_key(env=None) -> str:
+    env = env if env is not None else os.environ
+    key = env.get("TELNYX_API_KEY")
     if not key:
         raise RuntimeError(
             "TELNYX_API_KEY não está no ambiente. Rode via cofre (doppler run / op run)."
@@ -110,7 +121,7 @@ def make_call(to: str, message: str, from_number: str = None,
     resp = requests.post(
         TELNYX_CALLS_API,
         headers={
-            "Authorization": "Bearer {}".format(_api_key()),
+            "Authorization": "Bearer {}".format(_api_key(env)),
             "Content-Type": "application/json",
         },
         json=payload,
