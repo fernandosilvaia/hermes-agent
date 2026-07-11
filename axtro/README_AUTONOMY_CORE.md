@@ -83,6 +83,17 @@ execução). Se for `staging`/`production`, roda de verdade.
 > a 2ª camada impede ação real sem os gates. Ação real efetiva = runner autoriza
 > **E** gate no script.
 
+**No caminho ao vivo do daemon** (o loop de tool-use do gateway decidindo, via a
+tool genérica `terminal`, rodar o script de uma skill) o agente nunca chama
+`skill_runner.py` diretamente — ele só executa um comando de shell. `axtro/dispatch_guard.py`
+fecha esse gap: é chamado uma única vez, no topo de `tools/terminal_tool.terminal_tool()`,
+antes de qualquer backend (local/docker/ssh/modal) ser escolhido. Se o comando invoca
+diretamente o script de uma skill governada, ele passa pela mesma decisão do
+`autonomy_core` (via `contract_preflight.preflight_decision`) antes que qualquer
+subprocess exista — bloqueia se `blocked`/`killed`, força `--dry-run` se `dry_run`,
+passa sem alteração se `staging`/`production`. Comandos que não invocam uma skill
+governada (a esmagadora maioria) não são tocados.
+
 ---
 
 ## 4. O `contract.json` (exemplo)
@@ -202,6 +213,7 @@ python3 -m unittest discover -s axtro/tests -p 'test_*.py'
 |---|---|
 | `axtro/autonomy_core.py` | o cérebro: kill switch + anel + classe de risco + aprovação → decisão |
 | `axtro/skill_runner.py` | o executor oficial: decide → aplica modo → spawna → loga |
+| `axtro/dispatch_guard.py` | o gancho no caminho ao vivo: reconhece invocação direta de skill governada dentro de um comando de `terminal` e aplica a mesma decisão antes do subprocess existir |
 | `axtro/exec_log.py` | log estruturado (JSONL) + relatório |
 | `axtro/contract_guard.py` | regras base de contrato (validade, creds, stop, telemetry) |
 | `axtro/tools/contract_preflight.py` | gate por exit code (CLI + preflight) |
