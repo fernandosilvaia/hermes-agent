@@ -1,0 +1,46 @@
+{
+  "id": "dispatch_job",
+  "name": "Dispatch Job (Hermes -> Control Tower Job Queue)",
+  "owner_agent": "cto",
+  "execution_location": "both",
+  "default_model": "none",
+  "autonomy_ring": 2,
+  "tools": ["network:control_tower"],
+  "credentials": ["HOUSE_API_URL", "HOUSE_INGEST_TOKEN"],
+  "max_daily_cost_usd": 0.0,
+  "inputs": [
+    "repo_path (deve estar na allowlist)",
+    "branch (deve começar com hermes/)",
+    "executor (claude-code|shell)",
+    "task (descrição clara em linguagem natural)",
+    "allowed_commands",
+    "expected_outputs",
+    "requires_human_gate (opcional; forçado true se a tarefa parecer de risco alto)"
+  ],
+  "outputs": [
+    "dispatch_plan_json",
+    "job_payload (CreateJobInput do Control Tower)",
+    "job_criado (id, status, branch — só quando a execução foi liberada)"
+  ],
+  "stop_conditions": [
+    "repo_path fora da allowlist (AXTRO_REPO_ALLOWLIST, mesma env do MacBook Worker) -> BLOQUEADO, sem POST",
+    "branch que não começa com hermes/ -> BLOQUEADO, sem POST",
+    "executor fora de {claude-code, shell} -> BLOQUEADO (codex ainda não é executável pelo worker nesta máquina)",
+    "task/allowed_commands vazios -> BLOQUEADO",
+    "task com termo de risco alto (banco, migration, auth, senha, pagamento, stripe, deploy, produção, dns, secret, credencial, drop/delete/truncate) -> requires_human_gate FORÇADO true, mesmo que o chamador peça false",
+    "requires_human_gate não declarado explicitamente pelo chamador -> default seguro é true",
+    "dry-run é o default permanente; POST real só com --execute + HERMES_ALLOW_EXECUTE=true + DISPATCH_JOB_ENABLED=true",
+    "--dry-run explícito sempre vence, mesmo com as duas envs setadas",
+    "nunca decide sozinha QUANDO disparar — é uma capacidade chamável, não um gatilho automático (quem decide invocar é quem chama a skill)",
+    "nunca loga nem retorna HOUSE_INGEST_TOKEN em texto cru"
+  ],
+  "telemetry_events": ["dispatch_job.plan.decision", "dispatch_job.job.created"],
+  "human_gates": [
+    "todo job com requires_human_gate=true só é executado pelo MacBook Worker depois de POST /api/hermes/jobs/:id/approve no Control Tower (isHumanAuthorized — sessão admin do Office ou Basic Auth, nunca a credencial de máquina que esta skill usa pra criar o job)",
+    "job de risco alto (banco, auth, pagamento, deploy) nasce SEMPRE com requires_human_gate=true — a skill recusa aceitar false nesses casos"
+  ],
+  "enabled": false,
+  "production_ready": false,
+  "activation_stage": "staging",
+  "notes": "staging: capacidade callable com gate triplo (dry-run + HERMES_ALLOW_EXECUTE + DISPATCH_JOB_ENABLED) + allowlist de repo/branch/executor + veto por keyword de risco alto. Não há gatilho automático — o daemon ainda não decide sozinho quando chamar isto (regra explícita do pedido). Ativação em produção é ato humano."
+}
