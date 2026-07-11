@@ -3,7 +3,7 @@
   "name": "Hermes Purchase (guarda-corpo de gasto)",
   "owner_agent": "cfo",
   "execution_location": "macbook",
-  "default_model": "haiku",
+  "default_model": "none",
   "autonomy_ring": 3,
   "tools": ["terminal", "telegram"],
   "credentials": [],
