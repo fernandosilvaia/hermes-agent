@@ -144,6 +144,62 @@ AMD em `CALL_LOG_PATH`. Há um **gancho comentado** onde entraria o ElevenLabs C
 AI numa versão futura (conversa por IA em tempo real, como no Billion CRM) — não implementado
 agora.
 
+## 4. Ligação TENANT-SCOPED (conta Telnyx do próprio cliente)
+
+Tudo acima (`make_call.py`/`send_sms.py` sem `env`) usa SEMPRE a conta Telnyx
+**interna da Axtro** (`TELNYX_API_KEY`/`TELNYX_NUMBER` globais deste processo) —
+isso não muda em nada com o que segue.
+
+Quando um cliente com sua PRÓPRIA conta Telnyx (um tenant com número dedicado,
+provisionado em `org_integrations` no Control Tower) pede pro agente dele no
+Telegram ligar pra alguém, o pedido vira um `hermes_job`
+(`executor: "telnyx-call"`) no Control Tower — nunca uma chamada direta.
+`consume_tenant_calls.py` é o consumidor DEDICADO desse tipo de job (não é o
+MacBook Worker, que só sabe `claude-code`/`codex`/`shell`):
+
+```bash
+# Uma checagem por execução — rode via cron/systemd timer, não como daemon.
+python scripts/consume_tenant_calls.py
+python scripts/consume_tenant_calls.py --dry-run   # força modo seguro (teste manual)
+```
+
+Fluxo (ver docstring de `consume_tenant_calls.py` para o detalhe completo):
+
+1. `GET /api/hermes/jobs/next?executors=telnyx-call` — só pega jobs deste tipo
+   (nunca rouba um `claude-code`/`codex`/`shell` da fila compartilhada, e
+   vice-versa: o MacBook Worker também nunca pega um `telnyx-call`).
+2. `_tenant_call_policy.validate_job_gate()` reconfirma LOCALMENTE que o job
+   já foi aprovado por um humano (`requires_human_gate=true` +
+   `result.approved_by`) antes de gastar qualquer chamada de rede — nunca
+   confia cego no que veio do Control Tower.
+3. `POST /api/hermes/jobs/:id/telnyx-credential` resolve a credencial Telnyx
+   DECIFRADA da conta PRÓPRIA do tenant. **Uso único**: a mesma chamada que
+   resolve a credencial já marca o job como em execução — não dá pra reler a
+   mesma credencial duas vezes pelo mesmo job.
+4. `_tenant_call_policy.build_tenant_env()` monta um `env` NOVO, só pra esta
+   chamada (nunca `os.environ` real): a credencial do tenant + allowlist
+   restrita ao destino DESTE job + ledger de teto diário POR ORG. `make_call()`
+   roda com esse `env`, **sem nenhuma alteração na lógica de decisão** — as
+   mesmas travas de dry-run/allowlist/teto de `_send_policy.py` valem aqui.
+5. `POST /api/hermes/jobs/:id/status` reporta o resultado.
+
+**Gate padrão continua valendo** — o job já aprovado no Control Tower NÃO pula
+o dry-run local: a ligação real só acontece com `HERMES_ALLOW_EXECUTE=true`
+**E** `TENANT_TELNYX_CALLS_ENABLED=true` (flag PRÓPRIA deste fluxo — ligar
+`TELNYX_VOICE_SMS_ENABLED`, o gate do uso interno da Axtro, não libera isso, e
+vice-versa).
+
+| Variável (ambiente REAL do consumidor) | Para quê |
+|---|---|
+| `HOUSE_API_URL` / `HOUSE_INGEST_TOKEN` | falar com o Control Tower (mesmo token do MacBook Worker/dispatch-job) |
+| `TENANT_TELNYX_CALLS_ENABLED` | gate da ligação tenant-scoped (independente de `TELNYX_VOICE_SMS_ENABLED`) |
+| `TENANT_TELNYX_LEDGER_DIR` | diretório dos ledgers de teto diário, um arquivo por org |
+| `TENANT_TELNYX_DAILY_CALL_CAP` | teto diário por org (padrão `5`) |
+
+Não muda em nada: `make_call.py`/`send_sms.py` chamados sem `env` (uso interno
+da Axtro), o webhook `voice`/`sms` (`webhook_server.py`), nem os testes
+existentes de `_send_policy.py`.
+
 ## Segurança e regras de negócio
 
 - **Chave nunca hardcoded/logada** — sempre de `os.environ`. OTP/segredos nunca retornados em
