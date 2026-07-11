@@ -1894,6 +1894,43 @@ def terminal_tool(
                 "status": "error",
             }, ensure_ascii=False)
 
+        # ── Axtro governance chokepoint ──────────────────────────────────
+        # Governed skills (axtro/GOVERNED_SKILLS.txt) must clear
+        # autonomy_core's decision before any backend/subprocess exists.
+        # `dispatch_guard.check()` returns None for the overwhelming
+        # majority of commands (anything not a direct invocation of a
+        # governed skill's own script) — those are completely unaffected.
+        # See axtro/dispatch_guard.py for the full rationale.
+        try:
+            from axtro import dispatch_guard as _axtro_dispatch_guard
+            # Mirror _get_env_config()'s own cwd resolution (TERMINAL_CWD env
+            # override, else process cwd) so a relative script path resolves
+            # the same way here as it will once the command actually runs.
+            _governance = _axtro_dispatch_guard.check(
+                command, workdir=(workdir or os.getenv("TERMINAL_CWD")))
+        except Exception:
+            logger.exception("Axtro governance check raised; treating command as ungoverned")
+            _governance = None
+        if _governance is not None:
+            if _governance["action"] == "block":
+                logger.warning(
+                    "Axtro governance BLOCKED terminal command for skill %s (mode=%s): %s",
+                    _governance.get("skill"), _governance.get("mode"), _governance.get("message"),
+                )
+                return json.dumps({
+                    "output": "",
+                    "exit_code": -1,
+                    "error": "Blocked by Axtro governance (mode={}): {}".format(
+                        _governance.get("mode"), _governance.get("message")),
+                    "status": "error",
+                }, ensure_ascii=False)
+            if _governance["action"] == "dry_run":
+                logger.info(
+                    "Axtro governance forced --dry-run for skill %s: %s",
+                    _governance.get("skill"), _governance.get("message"),
+                )
+                command = _governance["command"]
+
         # Get configuration
         config = _get_env_config()
         env_type = config["env_type"]
