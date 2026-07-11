@@ -9,10 +9,18 @@ dependencies: []
 metadata:
   hermes:
     tags: [Monitoring, Briefing, Git, Security, Productivity, AnelZero]
-    related_skills: [google-workspace-axtro, ask-vps-hermes]
+    related_skills: [google-workspace-axtro, ask-vps-hermes, project-status-auditor]
 ---
 
 # Axtro Factory Monitor (Anel 0)
+
+> **Sobreposição conhecida com `project-status-auditor`:** as duas fazem varredura de
+> git nos repos da House. Use `axtro-factory-monitor` para o **briefing consolidado**
+> (git + prazos + segredo vazado + lint interno + inbox, entregue no Telegram,
+> agendado). Use `project-status-auditor` para um **raio-X só de git, rápido e
+> minimalista**, pensado para alimentar o `daily-ceo-report` ou rodar via
+> `ask-vps-hermes` quando o pedido vier da VPS. Não são a mesma coisa por acidente —
+> ainda não foram consolidadas numa só; se for mexer nisso, avise antes de fundir.
 
 Dá ao Hermes o "briefing da manhã" da software house: varre todos os repos com
 git sob `01_CLIENTES/` e `02_PRODUTOS/`, detecta projeto parado, mudanças não

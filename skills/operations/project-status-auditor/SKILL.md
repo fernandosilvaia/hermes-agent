@@ -9,10 +9,17 @@ dependencies: []
 metadata:
   hermes:
     tags: [Axtro, AgentOps, Git, CTO, Projetos]
-    related_skills: [daily-ceo-report]
+    related_skills: [daily-ceo-report, axtro-factory-monitor]
 ---
 
 # Project Status Auditor
+
+> **Sobreposição conhecida com `axtro-factory-monitor`:** ambas varrem git dos repos da
+> House. Esta skill é o raio-X **minimalista e rápido** (só git, pensado pra alimentar o
+> `daily-ceo-report` ou ser chamado via `ask-vps-hermes` quando o pedido vem da VPS). A
+> `axtro-factory-monitor` é o **briefing consolidado** (git + prazos + segredo vazado +
+> lint + inbox), agendado, entregue no Telegram. Ainda não foram fundidas — se for mexer,
+> avise antes.
 
 Varre os repositórios da House e reporta o estado de cada um **sem tocar em nada** — só
 lê o git local. É os "olhos" do Axtro Agent sobre a produção: quais projetos estão sujos,
