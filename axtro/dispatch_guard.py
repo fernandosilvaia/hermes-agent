@@ -48,13 +48,11 @@ fail-CLOSED decision function already used by the CLI preflight and by
 ``skill_runner.py``. Any error past that point still blocks (fail-closed),
 exactly like every other governed-skill code path in this repo.
 
-Scope note (matches the pre-existing assumption in contract_preflight.py's
-``_rel()`` / ``_default_is_governed()``): this only recognizes governed
-skills invoked from *this* repo checkout (paths resolved against ``REPO``).
-That is not a new limitation introduced here — ``skill_runner.py`` already
-only worked for a repo checkout, not an installed ``HERMES_HOME/skills``
-copy. Extending governance to installed-skill layouts is a separate,
-pre-existing gap this change does not attempt to close.
+Scope note: this recognizes a governed skill invoked from *any* of the
+roots ``contract_preflight._candidate_roots()`` knows about — the repo
+checkout (``REPO``, dev/CLI usage), the live ``HERMES_HOME/skills`` (default
+profile, the actual Docker production layout), or a named profile's
+``HERMES_HOME/profiles/<name>/skills``. See ``_governed_roots()`` below.
 """
 from __future__ import annotations
 
@@ -90,13 +88,36 @@ _ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
 
 def _governed_roots() -> dict:
-    """{repo-relative path: resolved absolute Path} for every governed skill.
+    """{repo-relative governed-skill path: [resolved absolute Path, ...]}.
+
+    Each governed skill can be physically present under more than one root
+    at once: the repo checkout (dev/CLI), the live ``HERMES_HOME/skills``
+    (Docker production, default profile), and/or a named profile's
+    ``HERMES_HOME/profiles/<name>/skills`` — see
+    ``contract_preflight._candidate_roots()`` for the authoritative list and
+    why order matters. A command invoking ANY of these physical copies must
+    resolve to the same governed key and get checked against the same
+    contract.json.
 
     Not cached — ``axtro/GOVERNED_SKILLS.txt`` is a handful of lines and
     ``contract_preflight`` itself re-reads on every call; a human editing the
     allowlist should take effect immediately, same as everywhere else.
     """
-    return {rel: (REPO / rel).resolve() for rel in pf._governed_set()}
+    bases = pf._candidate_roots()
+    roots: dict = {}
+    for rel in pf._governed_set():
+        candidates = []
+        seen = set()
+        for base in bases:
+            try:
+                resolved = (base / rel).resolve()
+            except Exception:
+                continue
+            if resolved not in seen:
+                seen.add(resolved)
+                candidates.append(resolved)
+        roots[rel] = candidates
+    return roots
 
 
 def _script_token(segment: str):
@@ -161,27 +182,38 @@ def _match_governed_skill(command: str, workdir: str | None, governed_roots=None
             resolved = _resolve(token, workdir)
             if resolved is None:
                 continue
-            for rel, root in roots.items():
-                # Normalize defensively — callers (including tests) may pass
-                # an unresolved path (e.g. a macOS /var/folders/... tempdir
-                # that is itself a symlink to /private/var/...), which would
-                # otherwise silently fail to match against `resolved`.
-                try:
-                    root = Path(root).resolve()
-                except Exception:
-                    continue
-                try:
-                    rel_to_root = resolved.relative_to(root)
-                except ValueError:
-                    continue
-                if rel_to_root.parts and rel_to_root.parts[0] == "scripts":
-                    return {
-                        "rel": rel,
-                        "skill_dir": root,
-                        "script_argv": [str(rel_to_root)] + rest,
-                        "parts": parts,
-                        "segment_index": idx,
-                    }
+            for rel, root_or_roots in roots.items():
+                # A governed skill may resolve to more than one root (repo
+                # checkout + HERMES_HOME + named profiles — see
+                # _governed_roots()). Callers (including tests, and the
+                # `governed_roots` override) may instead pass a single Path
+                # per rel — accept both shapes.
+                candidate_roots = (
+                    root_or_roots if isinstance(root_or_roots, (list, tuple))
+                    else [root_or_roots]
+                )
+                for root in candidate_roots:
+                    # Normalize defensively — callers (including tests) may
+                    # pass an unresolved path (e.g. a macOS /var/folders/...
+                    # tempdir that is itself a symlink to /private/var/...),
+                    # which would otherwise silently fail to match against
+                    # `resolved`.
+                    try:
+                        root = Path(root).resolve()
+                    except Exception:
+                        continue
+                    try:
+                        rel_to_root = resolved.relative_to(root)
+                    except ValueError:
+                        continue
+                    if rel_to_root.parts and rel_to_root.parts[0] == "scripts":
+                        return {
+                            "rel": rel,
+                            "skill_dir": root,
+                            "script_argv": [str(rel_to_root)] + rest,
+                            "parts": parts,
+                            "segment_index": idx,
+                        }
         return None
     except Exception:
         return None
