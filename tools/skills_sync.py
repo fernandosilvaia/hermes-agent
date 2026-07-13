@@ -19,6 +19,12 @@ Update logic:
   - REMOVED from bundled (in manifest, gone from repo): cleaned from manifest.
 
 The manifest lives at ~/.hermes/skills/.bundled_manifest.
+
+Multi-tenant deployments: ~/.hermes/skills/.skills_allowlist opts a
+HERMES_HOME into a fail-closed allowlist — when present, only the bundled
+skill names listed in it are ever eligible for sync, regardless of what
+ships in the image's skills/ tree. Absent by default, so any deployment
+that never opted in is unaffected. See SKILLS_ALLOWLIST_FILE below.
 """
 
 import hashlib
@@ -48,6 +54,20 @@ MANIFEST_FILE = SKILLS_DIR / ".bundled_manifest"
 # hermes_cli.profiles.NO_BUNDLED_SKILLS_MARKER (kept as a literal here to
 # avoid importing the CLI layer into this low-level sync module).
 NO_BUNDLED_SKILLS_MARKER = ".no-bundled-skills"
+
+# Optional allowlist for multi-tenant deployments (e.g. a client-scoped
+# HERMES_HOME provisioned by an operator running many isolated instances
+# off one image): ~/.hermes/skills/.skills_allowlist, one bundled skill
+# name per line, '#' comments allowed — same format as .curator_suppressed.
+# When ABSENT, sync behaves exactly as before (every bundled skill is
+# eligible) so a single-tenant deployment sees zero change. When PRESENT,
+# only the listed names are eligible for sync; every other bundled skill
+# is skipped even though it ships in the image. This is the fail-closed
+# mechanism a tenant-scoped HERMES_HOME should ship with so operator-only
+# skills (anything carrying the operator's own credentials rather than the
+# tenant's) never leak into a tenant's instance just because they're in the
+# bundled skills/ tree.
+SKILLS_ALLOWLIST_FILE = SKILLS_DIR / ".skills_allowlist"
 
 
 def _get_bundled_dir() -> Path:
@@ -116,6 +136,28 @@ def _read_suppressed_names() -> set:
         except OSError:
             pass
         return names
+
+
+def _read_allowlist_names() -> Optional[set]:
+    """Client-deployment skill allowlist — see SKILLS_ALLOWLIST_FILE comment.
+
+    Returns None when the file is absent (no restriction, default behavior
+    for any deployment that never opted in). Returns a set (possibly empty,
+    meaning "sync nothing bundled") when the file is present and parsed.
+    Same line format as ``_read_suppressed_names``: one skill name per
+    line, ``#`` comments and blank lines ignored.
+    """
+    if not SKILLS_ALLOWLIST_FILE.exists():
+        return None
+    names = set()
+    try:
+        for line in SKILLS_ALLOWLIST_FILE.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#"):
+                names.add(line)
+    except OSError:
+        pass
+    return names
 
 
 def _write_manifest(entries: Dict[str, str]):
@@ -457,7 +499,8 @@ def sync_skills(quiet: bool = False) -> dict:
 
     Returns:
         dict with keys: copied (list), updated (list), skipped (int),
-                        user_modified (list), cleaned (list), total_bundled (int)
+                        user_modified (list), cleaned (list),
+                        denied_by_allowlist (list), total_bundled (int)
     """
     # Opt-out: a profile (named or the default ~/.hermes) that wrote the
     # .no-bundled-skills marker gets zero bundled-skill seeding. Returning the
@@ -471,6 +514,7 @@ def sync_skills(quiet: bool = False) -> dict:
             "copied": [], "updated": [], "skipped": 0,
             "user_modified": [], "cleaned": [], "total_bundled": 0,
             "optional_provenance_backfilled": [], "skipped_opt_out": True,
+            "denied_by_allowlist": [],
         }
 
     bundled_dir = _get_bundled_dir()
@@ -478,12 +522,35 @@ def sync_skills(quiet: bool = False) -> dict:
         return {
             "copied": [], "updated": [], "skipped": 0,
             "user_modified": [], "cleaned": [], "suppressed": [], "total_bundled": 0,
-            "optional_provenance_backfilled": [],
+            "optional_provenance_backfilled": [], "denied_by_allowlist": [],
         }
 
     SKILLS_DIR.mkdir(parents=True, exist_ok=True)
     manifest = _read_manifest()
     bundled_skills = _discover_bundled_skills(bundled_dir)
+
+    # Client-deployment allowlist (see SKILLS_ALLOWLIST_FILE): when present,
+    # drop every bundled skill not explicitly listed BEFORE it's eligible for
+    # copy/update. This must run ahead of the suppressed-skill filter and the
+    # main loop so a denied skill is treated exactly like it never shipped in
+    # the image at all — same effect a client-scoped build would have, but
+    # enforced at sync time so one image can serve many isolated deployments.
+    allowlist = _read_allowlist_names()
+    denied_by_allowlist: List[str] = []
+    if allowlist is not None:
+        allowed_skills = []
+        for skill_name, skill_src in bundled_skills:
+            if skill_name in allowlist:
+                allowed_skills.append((skill_name, skill_src))
+            else:
+                denied_by_allowlist.append(skill_name)
+        bundled_skills = allowed_skills
+        if not quiet and denied_by_allowlist:
+            print(
+                f"  (skills allowlist active — {len(denied_by_allowlist)} bundled "
+                f"skill(s) not offered: {', '.join(sorted(denied_by_allowlist))})"
+            )
+
     bundled_names = {name for name, _ in bundled_skills}
     suppressed = _read_suppressed_names()
 
@@ -657,6 +724,7 @@ def sync_skills(quiet: bool = False) -> dict:
         "user_modified": user_modified,
         "cleaned": cleaned,
         "suppressed": suppressed_skipped,
+        "denied_by_allowlist": denied_by_allowlist,
         "total_bundled": len(bundled_skills),
         "optional_provenance_backfilled": optional_provenance_backfilled,
     }

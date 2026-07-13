@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from tools.skills_sync import (
     _get_bundled_dir,
+    _read_allowlist_names,
     _read_manifest,
     _read_skill_name,
     _write_manifest,
@@ -78,6 +79,37 @@ class TestReadWriteManifest:
             result = _read_manifest()
 
         assert result == {"old-skill": "", "new-skill": "abc123"}
+
+
+class TestReadAllowlistNames:
+    """.skills_allowlist — the fail-closed skill filter for client deployments."""
+
+    def test_missing_file_returns_none(self, tmp_path):
+        """None (not empty set) means 'no restriction' — must be distinguishable
+        from an allowlist file that exists but lists nothing."""
+        with patch("tools.skills_sync.SKILLS_ALLOWLIST_FILE", tmp_path / "nonexistent"):
+            result = _read_allowlist_names()
+        assert result is None
+
+    def test_present_but_empty_returns_empty_set(self, tmp_path):
+        allowlist_file = tmp_path / ".skills_allowlist"
+        allowlist_file.write_text("# nothing allowed yet\n")
+        with patch("tools.skills_sync.SKILLS_ALLOWLIST_FILE", allowlist_file):
+            result = _read_allowlist_names()
+        assert result == set()
+
+    def test_parses_names_ignoring_comments_and_blanks(self, tmp_path):
+        allowlist_file = tmp_path / ".skills_allowlist"
+        allowlist_file.write_text(
+            "# skills this client is allowed to use\n"
+            "clickup-read\n"
+            "\n"
+            "  \n"
+            "house-crm\n"
+        )
+        with patch("tools.skills_sync.SKILLS_ALLOWLIST_FILE", allowlist_file):
+            result = _read_allowlist_names()
+        assert result == {"clickup-read", "house-crm"}
 
 
 class TestDirHash:
@@ -313,6 +345,63 @@ class TestSyncSkills:
         # The non-suppressed bundled skill is still copied normally.
         assert "new-skill" in result["copied"]
         assert (skills_dir / "category" / "new-skill" / "SKILL.md").exists()
+
+    def test_allowlist_absent_syncs_everything(self, tmp_path):
+        """No .skills_allowlist file → default behavior, unaffected (a
+        single-tenant deployment must see zero change from this feature)."""
+        bundled = self._setup_bundled(tmp_path)
+        skills_dir = tmp_path / "user_skills"
+        manifest_file = skills_dir / ".bundled_manifest"
+        allowlist_file = skills_dir / ".skills_allowlist"  # never created
+
+        with self._patches(bundled, skills_dir, manifest_file), \
+                patch("tools.skills_sync.SKILLS_ALLOWLIST_FILE", allowlist_file):
+            result = sync_skills(quiet=True)
+
+        assert result["denied_by_allowlist"] == []
+        assert "new-skill" in result["copied"]
+        assert "old-skill" in result["copied"]
+
+    def test_allowlist_blocks_skills_not_listed(self, tmp_path):
+        """A client-scoped HERMES_HOME ships with .skills_allowlist naming only
+        what that client is allowed — everything else bundled must never land
+        on disk, even though it shipped in the image's skills/ tree. This is
+        the fix for the leak risk: operator-only skills carrying the
+        operator's own credentials must not sync into a client's instance
+        just because they're bundled."""
+        bundled = self._setup_bundled(tmp_path)
+        skills_dir = tmp_path / "user_skills"
+        manifest_file = skills_dir / ".bundled_manifest"
+        allowlist_file = skills_dir / ".skills_allowlist"
+        skills_dir.mkdir(parents=True)
+        allowlist_file.write_text("# only what this client needs\nnew-skill\n")
+
+        with self._patches(bundled, skills_dir, manifest_file), \
+                patch("tools.skills_sync.SKILLS_ALLOWLIST_FILE", allowlist_file):
+            result = sync_skills(quiet=True)
+
+        assert "new-skill" in result["copied"]
+        assert "old-skill" not in result["copied"]
+        assert result["denied_by_allowlist"] == ["old-skill"]
+        assert (skills_dir / "category" / "new-skill" / "SKILL.md").exists()
+        assert not (skills_dir / "old-skill").exists()
+
+    def test_allowlist_empty_file_blocks_all_bundled_skills(self, tmp_path):
+        """Fail-closed: an allowlist file that exists but lists nothing means
+        nothing bundled is eligible — not 'no restriction'."""
+        bundled = self._setup_bundled(tmp_path)
+        skills_dir = tmp_path / "user_skills"
+        manifest_file = skills_dir / ".bundled_manifest"
+        allowlist_file = skills_dir / ".skills_allowlist"
+        skills_dir.mkdir(parents=True)
+        allowlist_file.write_text("# nothing allowed yet\n")
+
+        with self._patches(bundled, skills_dir, manifest_file), \
+                patch("tools.skills_sync.SKILLS_ALLOWLIST_FILE", allowlist_file):
+            result = sync_skills(quiet=True)
+
+        assert result["copied"] == []
+        assert sorted(result["denied_by_allowlist"]) == ["new-skill", "old-skill"]
 
     def test_fresh_install_copies_all(self, tmp_path):
         bundled = self._setup_bundled(tmp_path)
@@ -712,7 +801,7 @@ class TestSyncSkills:
         assert result == {
             "copied": [], "updated": [], "skipped": 0,
             "user_modified": [], "cleaned": [], "suppressed": [], "total_bundled": 0,
-            "optional_provenance_backfilled": [],
+            "optional_provenance_backfilled": [], "denied_by_allowlist": [],
         }
 
     def test_failed_copy_does_not_poison_manifest(self, tmp_path):
