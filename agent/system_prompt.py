@@ -161,8 +161,16 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
         # Fallback to hardcoded identity
         stable_parts.append(DEFAULT_AGENT_IDENTITY)
 
-    # Pointer to the hermes-agent skill + docs for user questions about Hermes itself.
-    stable_parts.append(HERMES_AGENT_HELP_GUIDANCE)
+        # Pointer to the hermes-agent skill + docs for user questions about
+        # Hermes itself. Gated on the same _soul_loaded check as the identity
+        # fallback above: this text names "Hermes Agent (by Nous Research)"
+        # unconditionally, so appending it whenever a custom SOUL.md is
+        # present directly undermines that persona's own instructions (e.g.
+        # "never reveal the underlying engine, say <product name> instead")
+        # — the model sees an authoritative-sounding framework self-ID on
+        # every turn regardless of what SOUL.md asked for. A deployment
+        # without a custom SOUL.md still gets this guidance as before.
+        stable_parts.append(HERMES_AGENT_HELP_GUIDANCE)
 
     # Universal task-completion / no-fabrication guidance.  Applied to ALL
     # models regardless of tool_use_enforcement gating — the failure modes
