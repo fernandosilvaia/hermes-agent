@@ -24,7 +24,7 @@ import run_agent
 from run_agent import AIAgent
 from agent.error_classifier import FailoverReason
 from agent.memory_manager import MemoryManager
-from agent.prompt_builder import DEFAULT_AGENT_IDENTITY
+from agent.prompt_builder import DEFAULT_AGENT_IDENTITY, HERMES_AGENT_HELP_GUIDANCE
 
 
 # ---------------------------------------------------------------------------
@@ -1075,6 +1075,12 @@ class TestBuildSystemPrompt:
         prompt = agent._build_system_prompt()
         assert DEFAULT_AGENT_IDENTITY in prompt
 
+    def test_default_identity_includes_hermes_help_guidance(self, agent):
+        # Without a custom SOUL.md, the framework self-ID + its help pointer
+        # both apply — this is the pre-existing, unbranded default behavior.
+        prompt = agent._build_system_prompt()
+        assert HERMES_AGENT_HELP_GUIDANCE in prompt
+
     def test_can_use_soul_identity_even_when_context_files_are_skipped(self):
         with (
             patch("run_agent.get_tool_definitions", return_value=_make_tool_defs("terminal")),
@@ -1094,6 +1100,13 @@ class TestBuildSystemPrompt:
 
         assert "SOUL IDENTITY" in prompt
         assert DEFAULT_AGENT_IDENTITY not in prompt
+        # A custom SOUL.md replaces the framework identity outright — the
+        # "You run on Hermes Agent (by Nous Research)" help pointer must not
+        # leak alongside it. Real bug: a white-labeled deployment's SOUL.md
+        # instructed the model to never reveal the underlying engine, but
+        # this second, unconditional framework-identity string still named
+        # "Hermes Agent"/"Nous Research" on every turn, undermining it.
+        assert HERMES_AGENT_HELP_GUIDANCE not in prompt
 
     def test_includes_system_message(self, agent):
         prompt = agent._build_system_prompt(system_message="Custom instruction")
