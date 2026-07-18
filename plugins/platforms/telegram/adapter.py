@@ -5355,6 +5355,18 @@ class TelegramAdapter(BasePlatformAdapter):
             text,
         )
 
+        # 2.5) Axtro style rule: never send em/en-dash (—/–) to the client.
+        #    Standing rule from Fernando (2026-07-09, reinforced 2026-07-17)
+        #    covering every Telegram-facing agent (Luiza/tenant, Axtro Agent,
+        #    Axtro Mac) — models reach for "—" as a dramatic-pause connector
+        #    regardless of prompt instructions, so this is a hard filter, not
+        #    just persona guidance. Code/inline-code are already protected
+        #    (steps 1-2) and never touched. Dash between spaces (prose) becomes
+        #    ", "; dash with no surrounding space (a range like "10–15")
+        #    becomes a plain hyphen so the meaning survives.
+        text = re.sub(r'\s+[—–]\s+', ', ', text)
+        text = text.replace('—', '-').replace('–', '-')
+
         # 3) Convert markdown links – escape the display text; inside the URL
         #    only ')' and '\' need escaping per the MarkdownV2 spec.
         def _convert_link(m):
