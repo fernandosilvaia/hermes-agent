@@ -247,6 +247,27 @@ async def test_intermediate_send_still_retriggers_typing(adapter):
 
 
 # =========================================================================
+# format_message - Axtro style rule: never send em/en-dash
+# =========================================================================
+
+
+class TestFormatMessageNoDash:
+    def test_em_dash_in_prose_becomes_comma(self, adapter):
+        result = adapter.format_message("Reunião amanhã — 15h EST, tudo certo.")
+        assert "—" not in result
+        assert "amanhã, 15h" in result
+
+    def test_en_dash_range_becomes_hyphen(self, adapter):
+        result = adapter.format_message("Faixa de 10–15 minutos.")
+        assert "–" not in result
+        assert "10\\-15" in result
+
+    def test_dash_inside_code_block_preserved(self, adapter):
+        result = adapter.format_message("Código:\n```\nresult = a — b\n```")
+        assert "a — b" in result
+
+
+# =========================================================================
 # format_message - bold and italic
 # =========================================================================
 
