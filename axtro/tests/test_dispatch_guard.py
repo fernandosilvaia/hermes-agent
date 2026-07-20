@@ -14,14 +14,18 @@ Two layers of proof:
      "governed-and-disabled skill" fixture without needing any mocking.
 """
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "axtro"))
+sys.path.insert(0, str(REPO / "axtro" / "tools"))
 sys.path.insert(0, str(REPO))
 import dispatch_guard as dg  # noqa: E402
+import contract_preflight as pf  # noqa: E402
 
 
 class DispatchGuardFixtures(unittest.TestCase):
@@ -192,6 +196,137 @@ class DispatchGuardRealRepoState(unittest.TestCase):
         # "running" the skill.
         cmd = "cat skills/communication/telnyx-voice-sms/contract.json"
         r = dg.check(cmd, workdir=str(REPO), env=self._telnyx_creds_env())
+        self.assertIsNone(r)
+
+
+class DispatchGuardHermesHomePaths(unittest.TestCase):
+    """PROOF that the P0 gap is closed: a governed skill invoked from a path
+    shaped like the REAL Docker production layout — ``HERMES_HOME/skills/...``
+    (default profile) or ``HERMES_HOME/profiles/<name>/skills/...`` (a named
+    profile) — physically copied there by ``tools/skills_sync.py`` at
+    container boot, is now recognized and governed exactly like the repo
+    checkout path already was.
+
+    Uses a REAL governed rel from the actual ``axtro/GOVERNED_SKILLS.txt``
+    (``skills/finance/hermes-purchase``) but a SYNTHETIC, disabled
+    ``contract.json`` at a temp location that is NOT the repo checkout — so
+    a match can only happen via the new HERMES_HOME-aware root, never via
+    the pre-existing ``REPO`` root (which points at a completely different
+    absolute path, the real repo copy of this skill).
+
+    Each test also explicitly replays the OLD (pre-fix) single-root,
+    REPO-only lookup against the exact same command/workdir and asserts it
+    returns ``None`` — i.e. this is the concrete "would have silently
+    passed through before" case the task asked to prove, not vacuous new
+    coverage.
+    """
+
+    GOVERNED_REL = "skills/finance/hermes-purchase"
+
+    def setUp(self):
+        import tempfile
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name).resolve()
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _seed_disabled_skill(self, root: Path, rel: str = None) -> Path:
+        """Write a governed-and-disabled skill fixture under *root*/*rel*
+        (default: GOVERNED_REL), mirroring exactly what tools/skills_sync.py
+        physically produces under HERMES_HOME at container boot."""
+        rel = rel or self.GOVERNED_REL
+        d = root / rel
+        (d / "scripts").mkdir(parents=True)
+        (d / "scripts" / "run.py").write_text("print('ran')\n", encoding="utf-8")
+        contract = {
+            "id": "hermes-purchase-fixture", "enabled": False, "production_ready": True,
+            "activation_stage": "production", "autonomy_ring": 1,
+            "stop_conditions": ["manual"], "telemetry_events": ["ev"],
+            "credentials": [],
+        }
+        (d / "contract.json").write_text(json.dumps(contract), encoding="utf-8")
+        return d
+
+    def _assert_would_not_have_matched_pre_fix(self, command: str, workdir: str):
+        """Replays the OLD _governed_roots() shape ({rel: single REPO/rel
+        Path}, exactly what dispatch_guard.py computed before this fix) and
+        confirms the exact same command/workdir would have returned None —
+        i.e. this specific case would have silently passed through as
+        ungoverned prior to this change."""
+        pre_fix_roots = {rel: (dg.REPO / rel).resolve() for rel in pf._governed_set()}
+        pre_fix_match = dg._match_governed_skill(command, workdir, governed_roots=pre_fix_roots)
+        self.assertIsNone(
+            pre_fix_match,
+            "expected the pre-fix, REPO-only root lookup to MISS this HERMES_HOME-shaped "
+            "path (proving this test exercises the actual gap) — it unexpectedly matched, "
+            "so this fixture isn't isolated from the repo checkout as intended",
+        )
+
+    # ── default profile: HERMES_HOME/skills/<rel> ──────────────────────────
+    def test_default_profile_hermes_home_skill_path_is_blocked(self):
+        skill_dir = self._seed_disabled_skill(self.tmp)
+        command = "python3 scripts/run.py"
+
+        self._assert_would_not_have_matched_pre_fix(command, str(skill_dir))
+
+        with mock.patch.dict(os.environ, {"HERMES_HOME": str(self.tmp)}):
+            r = dg.check(command, workdir=str(skill_dir))
+        self.assertIsNotNone(
+            r, "governed skill under HERMES_HOME/skills/... was not recognized — "
+               "the exact production gap this fix closes")
+        self.assertEqual(r["action"], "block")
+        self.assertEqual(r["mode"], "blocked")
+        self.assertEqual(r["skill"], self.GOVERNED_REL)
+        self.assertIn("enabled", r["message"])
+
+    # ── named profile: HERMES_HOME/profiles/<name>/skills/<rel> ────────────
+    def test_named_profile_hermes_home_skill_path_is_blocked(self):
+        profile_home = self.tmp / "profiles" / "alfred"
+        profile_home.mkdir(parents=True)
+        skill_dir = self._seed_disabled_skill(profile_home)
+        command = "python3 scripts/run.py"
+
+        self._assert_would_not_have_matched_pre_fix(command, str(skill_dir))
+
+        with mock.patch.dict(os.environ, {"HERMES_HOME": str(profile_home)}):
+            r = dg.check(command, workdir=str(skill_dir))
+        self.assertIsNotNone(
+            r, "governed skill under HERMES_HOME/profiles/<name>/skills/... was not "
+               "recognized — the named-profile shape of the same production gap")
+        self.assertEqual(r["action"], "block")
+        self.assertEqual(r["mode"], "blocked")
+        self.assertEqual(r["skill"], self.GOVERNED_REL)
+
+    # ── still fails open / no over-matching ─────────────────────────────────
+    def test_path_outside_any_known_root_is_still_unmatched(self):
+        # A skill-shaped tree that sits under neither REPO, the current
+        # HERMES_HOME, nor any named profile must still pass through
+        # unaffected — this fix must not turn into "match anything that
+        # looks like a governed skill anywhere on disk".
+        stray_root = self.tmp / "not_a_hermes_home"
+        stray_root.mkdir()
+        skill_dir = self._seed_disabled_skill(stray_root)
+        # HERMES_HOME points elsewhere entirely, not at stray_root.
+        other_home = self.tmp / "actual_home"
+        other_home.mkdir()
+        with mock.patch.dict(os.environ, {"HERMES_HOME": str(other_home)}):
+            r = dg.check("python3 scripts/run.py", workdir=str(skill_dir))
+        self.assertIsNone(r)
+
+    def test_inspecting_hermes_home_skill_files_without_executing_is_not_matched(self):
+        skill_dir = self._seed_disabled_skill(self.tmp)
+        with mock.patch.dict(os.environ, {"HERMES_HOME": str(self.tmp)}):
+            r = dg.check(f"cat {skill_dir}/contract.json", workdir=str(skill_dir))
+        self.assertIsNone(r)
+
+    def test_ungoverned_skill_under_hermes_home_is_not_matched(self):
+        # A directory under HERMES_HOME/skills that is NOT in
+        # GOVERNED_SKILLS.txt must remain pass-through, same as it always
+        # has been for the repo-checkout root.
+        skill_dir = self._seed_disabled_skill(self.tmp, rel="skills/native/not-governed")
+        with mock.patch.dict(os.environ, {"HERMES_HOME": str(self.tmp)}):
+            r = dg.check("python3 scripts/run.py", workdir=str(skill_dir))
         self.assertIsNone(r)
 
 

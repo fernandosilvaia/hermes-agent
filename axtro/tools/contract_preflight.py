@@ -33,6 +33,8 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "axtro"))
+if str(REPO) not in sys.path:
+    sys.path.insert(0, str(REPO))
 import contract_guard as cg  # noqa: E402  (mantido p/ compat de quem importa daqui)
 import autonomy_core as ac  # noqa: E402
 
@@ -52,11 +54,77 @@ def _governed_set() -> set:
     return out
 
 
-def _rel(sdir: Path) -> str:
+def _candidate_roots() -> list:
+    """Every filesystem root a governed skill's directory may physically be
+    anchored under, across dev/CLI (repo checkout) AND Docker/production
+    (installed ``HERMES_HOME/skills`` layout, default profile or named).
+
+    ``GOVERNED_SKILLS.txt`` entries are written repo-relative (e.g.
+    ``skills/finance/hermes-purchase``) — but at runtime, ``tools/
+    skills_sync.py`` physically copies that same tree into
+    ``HERMES_HOME/skills`` (``hermes_constants.get_skills_dir()``) at
+    container boot (see ``docker/stage2-hook.sh``). For a NAMED profile,
+    that copy lands under ``<hermes-root>/profiles/<name>/skills`` instead
+    (``hermes_cli/profiles.py:get_profile_dir()``). A governed skill's
+    script invoked from ANY of these physical copies must resolve to the
+    same governed key so it gets checked against the same contract.json.
+
+    Order matters: named-profile directories are listed BEFORE the bare
+    hermes root, because the root is itself an ancestor of ``root/profiles/
+    <name>`` — if the root were tried first, a path under a named profile
+    would incorrectly relativize to ``profiles/<name>/skills/...`` instead
+    of ``skills/...`` and never match ``GOVERNED_SKILLS.txt``. Callers that
+    consume this list (``_rel()`` here, ``dispatch_guard._governed_roots()``)
+    must try roots in the order returned, first match wins.
+
+    Best-effort: importing ``hermes_constants`` or resolving any one root is
+    optional — if it fails, that candidate is silently skipped. This keeps
+    detection fail-open (same posture as the rest of this module's callers)
+    instead of ever raising out of a path-shape computation.
+    """
+    roots = [REPO]
     try:
-        return str(sdir.relative_to(REPO))
-    except ValueError:
-        return sdir.name
+        import hermes_constants as hc
+    except Exception:
+        return roots
+
+    default_root = None
+    try:
+        default_root = hc.get_default_hermes_root()
+        profiles_dir = default_root / "profiles"
+        if profiles_dir.is_dir():
+            for entry in sorted(profiles_dir.iterdir()):
+                if entry.is_dir():
+                    roots.append(entry)
+    except Exception:
+        pass
+    try:
+        roots.append(hc.get_hermes_home())
+    except Exception:
+        pass
+    if default_root is not None:
+        roots.append(default_root)
+
+    seen = set()
+    out = []
+    for r in roots:
+        try:
+            resolved = Path(r).resolve()
+        except Exception:
+            continue
+        if resolved not in seen:
+            seen.add(resolved)
+            out.append(resolved)
+    return out
+
+
+def _rel(sdir: Path) -> str:
+    for root in _candidate_roots():
+        try:
+            return str(sdir.relative_to(root))
+        except ValueError:
+            continue
+    return sdir.name
 
 
 def _default_is_governed(rel: str, sdir: Path) -> bool:
