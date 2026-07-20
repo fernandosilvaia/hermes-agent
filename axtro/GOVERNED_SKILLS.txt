@@ -13,6 +13,7 @@ skills/finance/hermes-purchase
 skills/operations/project-status-auditor
 skills/productivity/axtro-factory-monitor
 skills/operations/dispatch-job
+skills/operations/crm-connector
 
 # --- Exemplos do Autonomy Core (demonstração; seguros, governados p/ o Fernando testar) ---
 axtro/skill_examples/safe-diagnostic

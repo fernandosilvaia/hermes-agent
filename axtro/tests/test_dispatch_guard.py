@@ -198,6 +198,43 @@ class DispatchGuardRealRepoState(unittest.TestCase):
         r = dg.check(cmd, workdir=str(REPO), env=self._telnyx_creds_env())
         self.assertIsNone(r)
 
+    def test_real_crm_connector_write_op_is_recognized_and_gated(self):
+        # skills/operations/crm-connector (new skill, this change) also
+        # ships enabled=false today - same concrete proof shape as the
+        # telnyx test above, for a DIFFERENT governed skill, confirming the
+        # PR #10 chokepoint recognizes it too (not just the fixtures it was
+        # written against). crm_call.py has zero declared `credentials` (its
+        # secrets live in a HERMES_HOME connection-store file, not env vars,
+        # see contract.json's notes), so no fake-creds env is needed here -
+        # this isolates the R3 (enabled=false) gate cleanly.
+        cmd = (
+            "python3 skills/operations/crm-connector/scripts/crm_call.py "
+            "--connection ecoloop --operation update_stage "
+            "--param id=1 --param stage=won --execute"
+        )
+        r = dg.check(cmd, workdir=str(REPO), env={})
+        self.assertIsNotNone(r, "expected the real crm-connector skill to be recognized as governed")
+        self.assertEqual(r["action"], "block")
+        self.assertIn("enabled=false", r["message"])
+
+    def test_real_crm_connector_read_op_is_also_recognized(self):
+        # The chokepoint gates the SCRIPT invocation, not the individual
+        # operation - a read-shaped CLI call is matched and blocked exactly
+        # like the write one above, because the skill itself is
+        # enabled=false. (crm_call.py's OWN read/write distinction, which
+        # lets reads through freely once the skill is enabled, is proven
+        # separately in skills/operations/crm-connector/tests/test_crm_call.py -
+        # this test is only about the outer governance chokepoint.)
+        cmd = "python3 skills/operations/crm-connector/scripts/crm_call.py --connection ecoloop --operation list_leads"
+        r = dg.check(cmd, workdir=str(REPO), env={})
+        self.assertIsNotNone(r)
+        self.assertEqual(r["action"], "block")
+
+    def test_reading_the_crm_connector_contract_is_not_blocked(self):
+        cmd = "cat skills/operations/crm-connector/contract.json"
+        r = dg.check(cmd, workdir=str(REPO), env={})
+        self.assertIsNone(r)
+
 
 class DispatchGuardHermesHomePaths(unittest.TestCase):
     """PROOF that the P0 gap is closed: a governed skill invoked from a path

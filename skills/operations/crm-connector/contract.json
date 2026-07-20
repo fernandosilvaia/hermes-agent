@@ -1,0 +1,47 @@
+{
+  "id": "crm_connector",
+  "name": "CRM Connector (Generic REST)",
+  "owner_agent": "hermes",
+  "execution_location": "both",
+  "default_model": "none",
+  "autonomy_ring": 2,
+  "tools": ["terminal", "network:crm_rest"],
+  "credentials": [],
+  "max_daily_cost_usd": 0,
+  "inputs": [
+    "connection_name (conexao CRM previamente registrada)",
+    "operation_name (operacao previamente mapeada nessa conexao)",
+    "params (chave=valor pra preencher {placeholders} de path/body)",
+    "flags de gate: --execute, --dry-run"
+  ],
+  "outputs": [
+    "resultado_read_json (leitura executada)",
+    "would_call_json (preview de escrita, dry-run)",
+    "resultado_write_json (escrita real, só com o gate liberado)",
+    "conexoes_registradas (list/show, api_key sempre mascarada)"
+  ],
+  "stop_conditions": [
+    "leituras (metodo GET/HEAD) sao livres - chamam a API real imediatamente, sem gate, desde que a conexao/operacao ja estejam registradas",
+    "escritas (qualquer metodo != GET/HEAD) sao BLOQUEADAS por padrao: acao real so com --execute + HERMES_ALLOW_EXECUTE=true + CRM_CONNECTOR_ENABLED=true; --dry-run explicito sempre vence, mesmo com as duas envs setadas",
+    "o METODO HTTP declarado na operacao decide sozinho se ela e leitura ou escrita (GET/HEAD = leitura, qualquer outro verbo = escrita) - nao existe campo de config que rebaixe um verbo mutante pra 'leitura' e pule o gate (ver _crm_policy.infer_kind)",
+    "operacao ou conexao nao mapeada -> BLOQUEADA, sem tocar rede; a skill nunca monta uma URL/metodo arbitrario que o chamador peca na hora, so o que ja foi configurado por um humano em manage_connection.py",
+    "parametros de path (ex.: {id}) sao URL-encoded antes de entrar na URL final - nunca concatenados crus (fecha injeção de path/query via param)",
+    "api_key nunca aparece em log, auditoria, telemetria ou saida de list/show - sempre mascarada (so os ultimos 4 caracteres) ou redigida por completo nos headers de preview (would_call)",
+    "arquivo de conexoes gravado com permissao 0600 (dono le/escreve) em HERMES_HOME/crm_connector/connections.json - nunca commitado no repo",
+    "toda tentativa de escrita (dry-run, bloqueada ou real) vira linha append-only em HERMES_HOME/crm_connector/audit.log, sem api_key/body/response"
+  ],
+  "telemetry_events": [
+    "crm_connector.connection.registered",
+    "crm_connector.read.executed",
+    "crm_connector.write.dry_run",
+    "crm_connector.write.blocked",
+    "crm_connector.write.executed"
+  ],
+  "human_gates": [
+    "executar qualquer operacao de escrita real (passar --execute com as duas envs do gate ligadas: HERMES_ALLOW_EXECUTE e CRM_CONNECTOR_ENABLED)"
+  ],
+  "enabled": false,
+  "production_ready": false,
+  "activation_stage": "staging",
+  "notes": "staging: conector REST generico multi-conexao para qualquer CRM que o Fernando der acesso (base_url + api_key + mapa de operacoes nomeadas, registrado via manage_connection.py). Credenciais vivem em HERMES_HOME/crm_connector/connections.json (0600), nao em env var - por isso 'credentials' fica vazio no contrato; a governanca real esta no gate triplo de escrita (_crm_policy.gate_allows_execute) + no chokepoint dispatch_guard/contract_guard, nao em R7. Leituras seguem autonomas (mesmo padrao de gmail.py list/drive.py find em google-workspace-axtro). Ativacao em producao (enabled=true) e ato humano, junto com HERMES_ALLOW_EXECUTE e CRM_CONNECTOR_ENABLED fora do daemon."
+}
