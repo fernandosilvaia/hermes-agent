@@ -5,19 +5,19 @@
   "execution_location": "vps",
   "default_model": "haiku",
   "autonomy_ring": 2,
-  "tools": ["terminal", "telnyx_api", "webhook_server"],
+  "tools": ["terminal", "telnyx_api", "webhook_server", "telegram"],
   "credentials": [
     "TELNYX_API_KEY",
     "TELNYX_CONNECTION_ID",
     "TELNYX_INBOX_API_KEY",
     "TELNYX_PUBLIC_KEY",
-    "TELNYX_NUMBER",
-    "HOUSE_INGEST_TOKEN (só p/ consume_tenant_calls.py — mesmo token de máquina do MacBook Worker/dispatch-job)"
+    "TELNYX_NUMBER"
   ],
   "max_daily_cost_usd": 2,
   "inputs": [
     "to (E.164)",
     "text (SMS) / message (TTS da ligação)",
+    "contact + purpose (pedido de aprovação one-tap de ligação)",
     "dry_run (default true)",
     "reveal (default false, só p/ OTP com gate aberto)"
   ],
@@ -25,16 +25,21 @@
     "plano_dry_run_json",
     "resultado_envio_json",
     "ultimo_sms_mascarado",
-    "codigo_verificacao_mascarado"
+    "codigo_verificacao_mascarado",
+    "pedido_aprovacao_ligacao_json",
+    "auditoria_pedidos_ligacao_json"
   ],
   "stop_conditions": [
     "envio/ligação reais SÓ com --dry-run ausente E HERMES_ALLOW_EXECUTE=true E TELNYX_VOICE_SMS_ENABLED=true (o padrão permanente é dry-run)",
-    "destino fora da allowlist (default: só o próprio número TELNYX_NUMBER/+16174505166) é BLOQUEADO, mesmo com o gate aberto",
-    "teto diário de envios (TELNYX_DAILY_SEND_CAP, default 10) atingido -> BLOQUEADO",
+    "destino fora da allowlist (default: só o próprio número TELNYX_NUMBER/+16174505166) é BLOQUEADO, mesmo com o gate aberto; a única exceção é um pedido de ligação APROVADO one-tap no Telegram, que entra na allowlist SÓ daquela chamada (overlay de env, nunca o ambiente real)",
+    "ligação a terceiro via aprovação one-tap (request_call_approval.py): pedido pendente/rejeitado/expirado NUNCA disca; um tap depois do prazo (default 15 min, TELNYX_CALL_APPROVAL_TIMEOUT_SECONDS) vira expired e NUNCA aprova; claim de execução de USO ÚNICO garante no máximo UMA discagem por aprovação (double-tap/replay de callback não redisca); toda transição (created/approved/rejected/expired/executed) vai para o audit log durável em HERMES_HOME/telnyx_voice_sms/, amarrada ao id da aprovação e a quem decidiu",
+    "toda ligação TTS começa OBRIGATORIAMENTE se identificando como assistente de IA ligando em nome do Fernando/Axtro (prefixo em make_call.py; TELNYX_AI_DISCLOSURE_TEXT só troca o texto, vazio volta ao default, não há como desligar)",
+    "decide_call_request.py (rodado pelo gateway no tap do botão) só grava a decisão: NUNCA disca; a discagem acontece apenas no processo da skill via _call_approval_flow.execute_approved_call() -> make_call(), com todos os gates deste contrato por cima",
+    "teto diário de envios (TELNYX_DAILY_SEND_CAP, default 10) atingido -> BLOQUEADO, inclusive para ligação já aprovada no Telegram",
     "GET /sms/last exige Authorization: Bearer TELNYX_INBOX_API_KEY; sem a env -> 503; token errado -> 401; nunca abre sem auth",
-    "OTP/verification_code nunca sai em claro pela HTTP ou pela CLI — sempre mascarado; --reveal só com o gate humano aberto",
+    "OTP/verification_code nunca sai em claro pela HTTP ou pela CLI: sempre mascarado; --reveal só com o gate humano aberto",
     "TELNYX_API_KEY e demais segredos nunca são logados nem retornados",
-    "consume_tenant_calls.py (ligação TENANT-SCOPED, ver seção dedicada no SKILL.md): só processa job executor=='telnyx-call' já aprovado por humano no Control Tower (requires_human_gate=true + result.approved_by, reconfirmado LOCALMENTE por _tenant_call_policy.validate_job_gate — nunca confia cego no que veio da rede); a credencial Telnyx usada é SEMPRE a da conta PRÓPRIA do tenant (org_integrations no Control Tower), nunca TELNYX_API_KEY/TELNYX_NUMBER globais desta skill; ligação real só com HERMES_ALLOW_EXECUTE=true E TENANT_TELNYX_CALLS_ENABLED=true (flag PRÓPRIA, independente de TELNYX_VOICE_SMS_ENABLED — ligar uma não liga a outra); credencial resolvida via endpoint de USO ÚNICO (POST /api/hermes/jobs/:id/telnyx-credential) — nunca fica em texto puro na fila de jobs, nem pode ser relida duas vezes"
+    "consume_tenant_calls.py (ligação TENANT-SCOPED, ver seção dedicada no SKILL.md): só processa job executor=='telnyx-call' já aprovado por humano no Control Tower (requires_human_gate=true + result.approved_by, reconfirmado LOCALMENTE por _tenant_call_policy.validate_job_gate: nunca confia cego no que veio da rede); a credencial Telnyx usada é SEMPRE a da conta PRÓPRIA do tenant (org_integrations no Control Tower), nunca TELNYX_API_KEY/TELNYX_NUMBER globais desta skill; ligação real só com HERMES_ALLOW_EXECUTE=true E TENANT_TELNYX_CALLS_ENABLED=true (flag PRÓPRIA, independente de TELNYX_VOICE_SMS_ENABLED: ligar uma não liga a outra); credencial resolvida via endpoint de USO ÚNICO (POST /api/hermes/jobs/:id/telnyx-credential): nunca fica em texto puro na fila de jobs, nem pode ser relida duas vezes"
   ],
   "telemetry_events": [
     "telnyx_voice_sms.sms_planned",
@@ -42,21 +47,26 @@
     "telnyx_voice_sms.sms_blocked",
     "telnyx_voice_sms.call_planned",
     "telnyx_voice_sms.call_sent",
+    "telnyx_voice_sms.call_approval_requested",
+    "telnyx_voice_sms.call_approval_approved",
+    "telnyx_voice_sms.call_approval_rejected",
+    "telnyx_voice_sms.call_approval_expired",
+    "telnyx_voice_sms.call_approval_executed",
     "telnyx_voice_sms.inbox_read",
     "telnyx_voice_sms.sms_last_auth_denied",
     "telnyx_voice_sms.tenant_call_done",
     "telnyx_voice_sms.tenant_call_blocked"
   ],
   "human_gates": [
-    "enviar SMS a terceiro (destino fora da allowlist do próprio número)",
-    "ligar para terceiro (destino fora da allowlist do próprio número)",
+    "ligar para terceiro: aprovação one-tap POR LIGAÇÃO no Telegram (request_call_approval.py manda ao canal home do dono contato + número + motivo com botões Aprovar/Rejeitar; um toque em Aprovar dispara a ligação na hora; Rejeitar ou silêncio até o prazo, default 15 min, cancela; sem aprovação registrada não há discagem: substitui o antigo gate interativo de env/terminal)",
+    "enviar SMS a terceiro (destino fora da allowlist do próprio número): continua exigindo TELNYX_ALLOWED_RECIPIENTS (ato humano)",
     "revelar OTP/2FA em claro (--reveal)",
-    "ampliar a allowlist de destinatários (TELNYX_ALLOWED_RECIPIENTS)",
+    "ampliar a allowlist PERMANENTE de destinatários (TELNYX_ALLOWED_RECIPIENTS)",
     "expor o webhook_server publicamente / configurar TELNYX_INBOX_API_KEY",
-    "toda ligação tenant-scoped (consume_tenant_calls.py): aprovação humana REAL no Control Tower (POST /api/hermes/jobs/:id/approve, isHumanAuthorized — nunca a credencial de máquina que cria o job) ANTES de qualquer tentativa de discagem, sem exceção"
+    "toda ligação tenant-scoped (consume_tenant_calls.py): aprovação humana REAL no Control Tower (POST /api/hermes/jobs/:id/approve, isHumanAuthorized: nunca a credencial de máquina que cria o job) ANTES de qualquer tentativa de discagem, sem exceção"
   ],
   "enabled": false,
   "production_ready": false,
   "activation_stage": "staging",
-  "notes": "staging: P0 fechado (auth+máscara no /sms/last; gate dry-run+allowlist+teto em send/call). Ativação em produção (setar HERMES_ALLOW_EXECUTE, TELNYX_VOICE_SMS_ENABLED, TELNYX_INBOX_API_KEY e ampliar allowlist) é ato humano. Testes puros verdes sem rede."
+  "notes": "staging: P0 fechado (auth+máscara no /sms/last; gate dry-run+allowlist+teto em send/call). Aprovação one-tap no Telegram por ligação: store+audit em HERMES_HOME/telnyx_voice_sms/, decisão gravada pelo gateway (callback callreq: em plugins/platforms/telegram/adapter.py), discagem só no processo da skill. request_call_approval.py usa TELEGRAM_BOT_TOKEN e TELEGRAM_HOME_CHANNEL do ambiente do gateway (credenciais do gateway, não desta skill). consume_tenant_calls.py exige HOUSE_INGEST_TOKEN no próprio ambiente (mesmo token de máquina do MacBook Worker/dispatch-job; o script falha em voz alta sem ele: fora da lista credentials para não bloquear via R7 os usos que não precisam dele). Ativação em produção (setar HERMES_ALLOW_EXECUTE, TELNYX_VOICE_SMS_ENABLED, TELNYX_INBOX_API_KEY) é ato humano. Testes puros verdes sem rede."
 }

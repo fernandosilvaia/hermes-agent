@@ -30,6 +30,8 @@ cadastro) e **ligar** (versão simples com TTS; gancho para IA conversacional no
 | "qual foi o código de verificação que chegou?" | `read_inbox.py code` (mascarado; `--reveal` só com gate) |
 | "liga pro meu número e fala tal coisa" | `make_call.py --to +... --message "..." --execute` |
 | "faz uma ligação de teste" | `make_call.py --self --message "..." [--execute]` |
+| "liga pra Luiza/pro fornecedor e resolve X" (terceiro) | `request_call_approval.py --to +... --contact "..." --purpose "..."` (aprovação one-tap no Telegram, ver seção 5) |
+| "que ligações você pediu essa semana?" | `request_call_approval.py --list --days 7` |
 
 > **DRY-RUN é o padrão PERMANENTE.** `send_sms`/`make_call` só disparam de verdade se, ao
 > mesmo tempo: (a) `--dry-run` **não** foi passado, (b) `HERMES_ALLOW_EXECUTE=true`,
@@ -144,7 +146,76 @@ AMD em `CALL_LOG_PATH`. Há um **gancho comentado** onde entraria o ElevenLabs C
 AI numa versão futura (conversa por IA em tempo real, como no Billion CRM) — não implementado
 agora.
 
-## 4. Ligação TENANT-SCOPED (conta Telnyx do próprio cliente)
+## 4. Ligar para TERCEIRO com aprovação one-tap no Telegram
+
+Regra do Fernando: "no máximo um pedido no telegram". Para ligar para um
+membro do time ou uma empresa (fora da allowlist fixa), o agente NÃO abre um
+gate interativo de terminal: ele cria um pedido persistente e manda UMA
+mensagem ao dono no canal home do Telegram, com botões inline
+**Aprovar e ligar** / **Rejeitar**.
+
+```bash
+python scripts/request_call_approval.py \
+  --to +14075551234 \
+  --contact "Luiza (Techmax)" \
+  --purpose "Confirmar a visita técnica de amanhã às 9h" \
+  --message "Bom dia, Luiza. Confirmando a visita técnica de amanhã às 9h."
+```
+
+Fluxo completo:
+
+1. O script grava o pedido (id `crXXXXXXXX`, status `pending`) em
+   `$HERMES_HOME/telnyx_voice_sms/call_approvals.json` e envia a mensagem de
+   aprovação (contato + número + motivo + prazo) via Bot API, com
+   `callback_data` `callreq:a:<id>` / `callreq:r:<id>`. Depois fica
+   esperando a decisão (poll no store).
+2. O tap do botão chega no gateway
+   (`plugins/platforms/telegram/adapter.py::_handle_call_request_callback`),
+   que autoriza o usuário (mesma trilha dos botões de exec approval) e roda
+   `scripts/decide_call_request.py`, que SÓ grava a decisão (atômica e
+   idempotente). O gateway nunca disca.
+3. Aprovado: o processo que estava esperando dispara a ligação NA HORA via
+   `_call_approval_flow.execute_approved_call()` -> `make_call()`. O número
+   aprovado entra na allowlist SÓ desta chamada (overlay de env, mesmo
+   padrão do fluxo tenant). Rejeitado ou prazo estourado (default 15 min,
+   `TELNYX_CALL_APPROVAL_TIMEOUT_SECONDS`): nada é discado, e o agente
+   recebe o resultado.
+
+Garantias (todas testadas em `tests/`):
+
+- **Sem aprovação não há discagem.** Pedido `pending`/`rejected`/`expired`
+  nunca chega no `make_call`; tap depois do prazo vira `expired`, nunca
+  aprova.
+- **Uma aprovação = no máximo UMA ligação.** Claim atômico de uso único;
+  double-tap, callback repetido ou retry não rediscam.
+- **Os trilhos existentes continuam valendo.** `HERMES_ALLOW_EXECUTE`,
+  `TELNYX_VOICE_SMS_ENABLED`, teto diário e E.164 são checados por cima da
+  aprovação.
+- **Toda ligação se identifica como IA.** O TTS começa SEMPRE com o prefixo
+  de identificação (assistente de IA da Axtro em nome do Fernando) antes do
+  conteúdo; `TELNYX_AI_DISCLOSURE_TEXT` troca o texto, mas não desliga.
+- **Auditável.** Cada transição (created/approved/rejected/expired/executed,
+  com quem decidiu e quando) vai para
+  `$HERMES_HOME/telnyx_voice_sms/call_approval_audit.jsonl`; a ligação
+  executada registra o `call_control_id` amarrado ao id da aprovação.
+  `--list --days 7` responde "que ligações você pediu essa semana".
+
+| Variável | Para quê |
+|---|---|
+| `TELEGRAM_BOT_TOKEN` | mesmo bot do gateway (envio da mensagem de aprovação) |
+| `TELEGRAM_HOME_CHANNEL` | chat id do dono (destino do pedido) |
+| `TELEGRAM_HOME_CHANNEL_THREAD_ID` | opcional, tópico do canal home |
+| `TELNYX_CALL_APPROVAL_CHAT_ID` | opcional, override do chat do pedido |
+| `TELNYX_CALL_APPROVAL_TIMEOUT_SECONDS` | prazo de aprovação (default `900`) |
+| `TELNYX_CALL_APPROVAL_STORE_PATH` / `TELNYX_CALL_APPROVAL_AUDIT_PATH` | overrides do store/audit |
+| `TELNYX_CALL_APPROVAL_DECIDE_SCRIPT` | override do caminho do decide script (gateway) |
+| `TELNYX_AI_DISCLOSURE_TEXT` | texto do prefixo de identificação de IA (nunca desliga) |
+
+Modos extras: `--no-wait` (só cria e envia; conferir depois com
+`--status <id>` e executar com `--execute <id>`), `--dry-run` (mostra o que
+faria sem gravar nem enviar), `--list [--days N]` (auditoria).
+
+## 5. Ligação TENANT-SCOPED (conta Telnyx do próprio cliente)
 
 Tudo acima (`make_call.py`/`send_sms.py` sem `env`) usa SEMPRE a conta Telnyx
 **interna da Axtro** (`TELNYX_API_KEY`/`TELNYX_NUMBER` globais deste processo) —
@@ -217,10 +288,14 @@ existentes de `_send_policy.py`.
 - **Assinatura do webhook validada** (Ed25519 + anti-replay). `TELNYX_VERIFY_SIGNATURE=false`
   existe só para debug local; **nunca** desligar em produção.
 - **Idempotência**: webhooks podem chegar duplicados — use `data.id` se for agir sobre eles.
-- ⚠️ **Ligações/SMS a terceiros**: para **números de teste próprios** é OK. **Qualquer campanha
-  ou contato com terceiros externos exige o destino na allowlist E o gate humano aberto ANTES**
-  (regra de negócio; consentimento/TCPA é responsabilidade do Fernando). O código impõe isso —
-  não é mais só um comentário.
+- ⚠️ **Ligações/SMS a terceiros**: para **números de teste próprios** é OK. **SMS a terceiro
+  exige o destino na allowlist (`TELNYX_ALLOWED_RECIPIENTS`, ato humano). Ligação a terceiro
+  exige aprovação one-tap POR LIGAÇÃO no Telegram (seção 4): um pedido, um toque em Aprovar,
+  uma ligação no máximo.** Consentimento/TCPA continua sendo responsabilidade do Fernando
+  ANTES de aprovar. O código impõe isso, não é só um comentário.
+- **Identificação de IA obrigatória**: toda ligação TTS começa se identificando como
+  assistente de IA da Axtro ligando em nome do Fernando, antes de qualquer conteúdo
+  (`apply_ai_disclosure` em `make_call.py`; sem flag para desligar).
 
 ## Confirmar antes de ir pra produção
 
