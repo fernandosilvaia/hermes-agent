@@ -239,6 +239,61 @@ def _with_dry_run(parts: list, segment_index: int) -> str:
     return "".join(new_parts)
 
 
+# Axtro governance toggles (autonomy_core.py / contract_guard.py): operator-
+# level switches, not per-profile secrets. They must always come from the
+# REAL process os.environ regardless of which profile's turn is active — an
+# operator flipping HERMES_KILL_SWITCH at the container level has to stop
+# every profile, and a per-profile secret scope (built only from that
+# profile's .env) would never carry them. Not in agent.secret_scope's own
+# _GLOBAL_ENV_PREFIXES/_GLOBAL_ENV_EXACT because that module was written for
+# the upstream multiplexer (provider keys, platform tokens) before Axtro's own
+# governance layer existed — this is the axtro-specific extension of that list.
+_GOVERNANCE_GLOBAL_ENV = (
+    "HERMES_KILL_SWITCH", "HERMES_HUMAN_APPROVAL", "HERMES_RING_GATE",
+    "HERMES_ALLOW_EXECUTE",
+)
+
+
+def build_scoped_env() -> dict:
+    """Environment to hand ``contract_preflight.preflight_decision`` (the R7
+    credential-presence gate and the kill-switch/ring-gate checks) so it sees
+    the ACTIVE multiplex profile's secrets for credentials, while still
+    honoring the real process-level governance toggles.
+
+    Under ``gateway.multiplex_profiles``, a governed skill's declared
+    ``credentials`` (contract.json) live only in that profile's ``.env`` —
+    installed per-turn via ``agent.secret_scope.set_secret_scope`` inside
+    ``gateway/run.py``'s ``_profile_runtime_scope``, never copied into the
+    process-global ``os.environ`` (that would leak profile A's credential
+    into profile B's turn). Passing bare ``os.environ`` here would make R7
+    wrongly see the credential as ABSENT for a correctly-configured client
+    profile (fail-safe, but wrong) whenever multiplexing is active — and
+    blindly merging the WHOLE ``os.environ`` in would let any credential that
+    happens to be set at the container level (an operator mistake, or a
+    stale value from before this deployment moved to per-profile ``.env``
+    files) leak into every profile equally. So the base here is intentionally
+    narrow: only the genuinely-global vars (``agent.secret_scope``'s own list
+    plus the governance toggles above), never the full environment.
+
+    Outside multiplex (today's Alfred/Techmax deployments,
+    ``multiplex_profiles: false``), ``current_secret_scope()`` is always
+    ``None``, so this returns ``dict(os.environ)`` unchanged — byte-identical
+    to the previous default, zero behavior change.
+    """
+    from agent.secret_scope import _is_global_env, current_secret_scope
+
+    scope = current_secret_scope()
+    if scope is None:
+        return dict(os.environ)
+
+    merged = {
+        name: value for name, value in os.environ.items()
+        if _is_global_env(name) or name in _GOVERNANCE_GLOBAL_ENV
+    }
+    merged.update(scope)
+    return merged
+
+
 def check(command: str, workdir: str | None = None, env=None, *, governed_roots=None) -> dict | None:
     """Called once, at the top of ``terminal_tool()``, before any backend is
     selected.
@@ -268,7 +323,7 @@ def check(command: str, workdir: str | None = None, env=None, *, governed_roots=
     # pass-through" for any test fixture that isn't in the real file.
     decision = pf.preflight_decision(
         match["skill_dir"],
-        env=env if env is not None else os.environ,
+        env=env if env is not None else build_scoped_env(),
         is_governed=lambda _rel, _sdir: True,
     )
     mode = decision["mode"]

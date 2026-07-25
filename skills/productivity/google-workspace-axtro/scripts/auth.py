@@ -15,14 +15,26 @@ Nunca hardcode credenciais. Nunca logue o conteúdo de GOOGLE_SERVICE_ACCOUNT_KE
 
 import json
 import os
+import sys
 from functools import lru_cache
+from pathlib import Path
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+from agent.secret_scope import get_secret  # noqa: E402
+
 # Conta impersonada via domain-wide delegation. Pode ser sobrescrita por env
-# se um dia precisar agir como outra caixa do mesmo domínio.
-IMPERSONATED_USER = os.environ.get("GOOGLE_IMPERSONATED_USER", "axtro@axtroai.com")
+# se um dia precisar agir como outra caixa do mesmo domínio. Defesa em
+# profundidade: esta skill é internal-only (axtro/tenant_skill_catalog.py) e
+# nunca deveria existir no disco de um perfil-cliente sob multiplex_profiles
+# — mas se um bug de allowlist algum dia deixar passar, get_secret() falha
+# alto (UnscopedSecretError) em vez de silenciosamente usar a credencial
+# global da Axtro.
+IMPERSONATED_USER = get_secret("GOOGLE_IMPERSONATED_USER", "axtro@axtroai.com")
 
 # Escopos por serviço — cada função pede só o que precisa (menor privilégio).
 # Todos já autorizados no admin do Workspace (ver brief).
@@ -50,7 +62,7 @@ class WorkspaceAuthError(RuntimeError):
 
 
 def _load_key_info() -> dict:
-    raw = os.environ.get("GOOGLE_SERVICE_ACCOUNT_KEY_JSON")
+    raw = get_secret("GOOGLE_SERVICE_ACCOUNT_KEY_JSON")
     if not raw:
         raise WorkspaceAuthError(
             "GOOGLE_SERVICE_ACCOUNT_KEY_JSON não está definido no ambiente. "
@@ -125,7 +137,7 @@ def whoami() -> dict:
         "impersonating": IMPERSONATED_USER,
         "emailAddress": profile.get("emailAddress"),
         "messagesTotal": profile.get("messagesTotal"),
-        "service_account_email": os.environ.get("GOOGLE_SERVICE_ACCOUNT_EMAIL", "(não informado)"),
+        "service_account_email": get_secret("GOOGLE_SERVICE_ACCOUNT_EMAIL", "(não informado)"),
     }
 
 
