@@ -97,10 +97,33 @@ _AWS_SDK_CREDENTIAL_ENV_VARS = frozenset({
     "AWS_BEARER_TOKEN_BEDROCK",
 })
 
+# Axtro-internal skill credentials, same rationale as _AWS_SDK_CREDENTIAL_ENV_VARS
+# above: these are Hermes-inference-secret-analogous (a specific API/service key
+# the AGENT'S OWN SKILL SCRIPTS read directly via get_secret()/os.environ in their
+# own process — never something a spawned shell command legitimately needs), not
+# general-purpose credentials a user's own shell would use for unrelated tasks.
+# Blocking them from inheriting into terminal/execute_code subprocesses costs no
+# user capability, same as the Bedrock token exception.
+#
+# Found missing from this blocklist during the multiplex adversarial security
+# review (2026-07-24): PROVIDER_REGISTRY/OPTIONAL_ENV_VARS only cover upstream
+# LLM providers and built-in tool/messaging integrations — axtro/'s own custom
+# skills (google-workspace-axtro, ask-vps-hermes) were never registered there,
+# so their credentials leaked into every terminal-spawned subprocess even
+# though the skills themselves already read them via get_secret() (Fase 1.3).
+# TERMINAL_SSH_KEY (the SSH private key material) is deliberately included;
+# TERMINAL_SSH_HOST/_USER/_PORT are connection metadata, not secrets — no
+# security value in blocking those, so they're left inheritable.
+_AXTRO_INTERNAL_CREDENTIAL_ENV_VARS = frozenset({
+    "HERMES_VPS_API_SERVER_KEY",
+    "GOOGLE_SERVICE_ACCOUNT_KEY_JSON",
+    "TERMINAL_SSH_KEY",
+})
+
 
 def _build_provider_env_blocklist() -> frozenset:
     """Derive the blocklist from provider, tool, and gateway config."""
-    blocked: set[str] = set()
+    blocked: set[str] = set(_AXTRO_INTERNAL_CREDENTIAL_ENV_VARS)
 
     try:
         from hermes_cli.auth import PROVIDER_REGISTRY
