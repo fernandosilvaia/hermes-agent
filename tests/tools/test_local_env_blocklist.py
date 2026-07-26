@@ -215,6 +215,45 @@ class TestProviderEnvBlocklist:
         assert result_env["MY_CUSTOM_VAR"] == "keep-this"
 
 
+class TestAxtroInternalCredentialBlocklist:
+    """axtro/'s own skill credentials (google-workspace-axtro, ask-vps-hermes)
+    and the SSH terminal backend's private key must not leak into terminal-
+    spawned subprocesses — same rationale as the Bedrock bearer token.
+
+    Regression for the multiplex adversarial security review (2026-07-24):
+    these were never registered in PROVIDER_REGISTRY/OPTIONAL_ENV_VARS (both
+    are upstream-only catalogs), so _build_provider_env_blocklist silently
+    missed them even though get_secret() (Fase 1.3) already protects the
+    skills' OWN process-level reads — this closes the remaining gap where a
+    spawned CHILD subprocess could still see the raw os.environ value.
+    """
+
+    def test_axtro_credentials_are_stripped(self):
+        leaked_vars = {
+            "HERMES_VPS_API_SERVER_KEY": "vps-secret",
+            "GOOGLE_SERVICE_ACCOUNT_KEY_JSON": '{"type":"service_account"}',
+            "TERMINAL_SSH_KEY": "-----BEGIN OPENSSH PRIVATE KEY-----",
+        }
+        result_env = _run_with_env(extra_os_env=leaked_vars)
+
+        for var in leaked_vars:
+            assert var not in result_env, f"{var} leaked into subprocess env"
+
+    def test_ssh_connection_metadata_is_preserved(self):
+        """TERMINAL_SSH_HOST/_USER/_PORT are connection metadata, not secrets
+        — no security value in blocking those, so a subprocess that needs to
+        know where it's connected (e.g. for logging) still can."""
+        metadata = {
+            "TERMINAL_SSH_HOST": "vps.axtroai.com",
+            "TERMINAL_SSH_USER": "hermes",
+            "TERMINAL_SSH_PORT": "22",
+        }
+        result_env = _run_with_env(extra_os_env=metadata)
+
+        for var, value in metadata.items():
+            assert result_env.get(var) == value, f"{var} was unexpectedly stripped"
+
+
 class TestForceEnvOptIn:
     """Callers can opt in to passing a blocked var via _HERMES_FORCE_ prefix."""
 
@@ -274,6 +313,15 @@ class TestBlocklistCoverage:
         inference token (the Bedrock bearer) to the blocklist, keyed off
         auth_type so any future SDK-cred provider is covered automatically."""
         assert "AWS_BEARER_TOKEN_BEDROCK" in _HERMES_PROVIDER_ENV_BLOCKLIST
+
+    def test_axtro_internal_credentials_are_in_blocklist(self):
+        """axtro/'s own skill credentials must be covered — see
+        TestAxtroInternalCredentialBlocklist for the end-to-end proof."""
+        assert {
+            "HERMES_VPS_API_SERVER_KEY",
+            "GOOGLE_SERVICE_ACCOUNT_KEY_JSON",
+            "TERMINAL_SSH_KEY",
+        }.issubset(_HERMES_PROVIDER_ENV_BLOCKLIST)
 
     def test_general_aws_chain_not_in_blocklist(self):
         """The general AWS credential chain must NOT be in the blocklist —

@@ -32,10 +32,16 @@ import argparse
 import json
 import os
 import sys
+from pathlib import Path
 
 # Garante que o módulo de política (mesmo diretório) seja importável tanto quando
 # rodado como script (`python ask_vps.py`) quanto importado como módulo.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+from agent.secret_scope import get_secret  # noqa: E402
 
 from _relay_policy import (  # noqa: E402
     TASK_TYPES_PERMITIDOS,
@@ -46,7 +52,12 @@ DEFAULT_URL = os.environ.get("HERMES_VPS_URL", "https://hermes.axtroai.com")
 
 
 def _api_key() -> str:
-    key = os.environ.get("HERMES_VPS_API_SERVER_KEY")
+    # Defesa em profundidade: esta skill é internal-only
+    # (axtro/tenant_skill_catalog.py) e nunca deveria existir no disco de um
+    # perfil-cliente sob multiplex_profiles — mas se um bug de allowlist
+    # algum dia deixar passar, get_secret() falha alto (UnscopedSecretError)
+    # em vez de silenciosamente usar a chave real da VPS da Axtro.
+    key = get_secret("HERMES_VPS_API_SERVER_KEY")
     if not key:
         raise RuntimeError(
             "HERMES_VPS_API_SERVER_KEY não está no ambiente. Rode via cofre "
