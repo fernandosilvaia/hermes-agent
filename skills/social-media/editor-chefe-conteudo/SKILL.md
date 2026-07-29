@@ -16,6 +16,30 @@ histórias sobre os agentes e projetos). Não confundir com uma futura fila
 pra página pessoal do Fernando, que é conteúdo diferente (sobre ele, não
 sobre "a fábrica") e ainda não foi desenhada.
 
+## ⚠️ Pegadinha de ambiente descoberta na prática (leia antes de mexer nos crons)
+
+O parâmetro `workdir` do `hermes cron create/edit` **não é confiável** — mesmo
+setado, o terminal do agente numa execução de cron pode abrir em
+`/opt/hermes` (pasta do framework, não da skill) com `$HOME` resolvendo pra
+um caminho tipo `/opt/data/home`, diferente do que `docker exec --user
+hermes` mostra manualmente. Isso já causou 7 tentativas falhas em sequência
+(2026-07-29) onde o agente achava que tinha salvo o pacote mas nunca tinha
+executado o comando de verdade, ou executava em cwd errado e falhava
+silenciosamente sem reportar direito.
+
+**Correção aplicada, sempre fazer assim daqui pra frente:**
+1. Nunca confiar em `workdir` sozinho. Sempre usar o **caminho absoluto
+   completo** do script no prompt do cron:
+   `/opt/hermes/.venv/bin/python3 /opt/data/skills/social-media/editor-chefe-conteudo/scripts/editor_chefe.py <comando>`.
+2. `editor_chefe.py` usa `EDITOR_CHEFE_STATE_DIR` (env var, default
+   `~/.hermes/conteudo`) — na VPS está fixada em `/opt/data/conteudo` via
+   `.env` do container, exatamente pra não depender de qual `$HOME` o
+   terminal resolve numa execução de cron.
+3. Ao testar manualmente via `docker exec`, sempre `--user hermes` E setar
+   `EDITOR_CHEFE_STATE_DIR` explicitamente na chamada, pra bater com o que o
+   cron de verdade usa — testar sem isso engana (mostra "sem pendente"
+   mesmo quando o cron real já salvou algo, só que em outro `$HOME`).
+
 ## Escopo do v1 (o que tem e o que não tem)
 
 **Tem:** banco de histórias fixo dos 7 dias iniciais (`editor_chefe.py` já
