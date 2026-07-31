@@ -5,6 +5,7 @@
   "execution_location": "both",
   "default_model": "none",
   "autonomy_ring": 0,
+  "risk_class": "safe",
   "tools": ["terminal", "network:google_maps"],
   "credentials": ["GOOGLE_MAPS_API_KEY"],
   "max_daily_cost_usd": 0,
@@ -27,8 +28,8 @@
     "google_maps_geocode.lookup.executed",
     "google_maps_geocode.lookup.failed"
   ],
-  "enabled": false,
-  "production_ready": false,
-  "activation_stage": "staging",
-  "notes": "staging: construída pra dar ao Alfred Kings (cliente Gabriel Kingsbury/Ecoloop) contexto de localização em consultas imobiliárias — geocodifica endereço pra lat/lng (entrada de outras skills como attom-property/rentcast-estimate) ou o inverso. Anel 0 (leitura pura, sem custo de LLM) por ser determinística e sem ação externa. GOOGLE_MAPS_API_KEY é a própria chave do Gabriel (Doppler dele, projeto alfred-kings-ai), nunca a da Axtro."
+  "enabled": true,
+  "production_ready": true,
+  "activation_stage": "production",
+  "notes": "ATIVADA 2026-07-26 por decisão explícita do Fernando (\"ativa as 3 skills\") — gate humano registrado aqui. production_ready=true e activation_stage=production exigidos junto de enabled=true (invariante I1 do validate_contracts.py); maturidade real por trás disso: 23 testes automatizados (HTTP mockado) + 1 teste de reconhecimento real pelo dispatch_guard, sem checklist/revisão adversarial formal separada além disso. construída pra dar ao Alfred Kings (cliente Gabriel Kingsbury/Ecoloop) contexto de localização em consultas imobiliárias — geocodifica endereço pra lat/lng (entrada de outras skills como attom-property/rentcast-estimate) ou o inverso. Anel 0 (leitura pura, sem custo de LLM) por ser determinística e sem ação externa. GOOGLE_MAPS_API_KEY é a própria chave do Gabriel (Doppler dele, projeto alfred-kings-ai), nunca a da Axtro."
 }

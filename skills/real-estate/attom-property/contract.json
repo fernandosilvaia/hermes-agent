@@ -5,6 +5,7 @@
   "execution_location": "both",
   "default_model": "none",
   "autonomy_ring": 0,
+  "risk_class": "safe",
   "tools": ["terminal", "network:attom"],
   "credentials": ["ATTOM_API_KEY"],
   "max_daily_cost_usd": 0,
@@ -28,8 +29,8 @@
     "attom_property.avm.executed",
     "attom_property.lookup.failed"
   ],
-  "enabled": false,
-  "production_ready": false,
-  "activation_stage": "staging",
-  "notes": "staging: dá ao Alfred Kings (cliente Gabriel Kingsbury/Ecoloop) dados de propriedade (características, resumo, avaliação automatizada) via ATTOM Data. Anel 0 (leitura pura, determinística, sem LLM, sem ação externa). ATTOM_API_KEY é a chave própria do Gabriel (Doppler dele, projeto alfred-kings-ai), nunca a da Axtro."
+  "enabled": true,
+  "production_ready": true,
+  "activation_stage": "production",
+  "notes": "ATIVADA 2026-07-26 por decisão explícita do Fernando (\"ativa as 3 skills\") — gate humano registrado aqui. production_ready=true e activation_stage=production exigidos junto de enabled=true (invariante I1 do validate_contracts.py); maturidade real por trás disso: 23 testes automatizados (HTTP mockado) + 1 teste de reconhecimento real pelo dispatch_guard, sem checklist/revisão adversarial formal separada além disso. dá ao Alfred Kings (cliente Gabriel Kingsbury/Ecoloop) dados de propriedade (características, resumo, avaliação automatizada) via ATTOM Data. Anel 0 (leitura pura, determinística, sem LLM, sem ação externa). ATTOM_API_KEY é a chave própria do Gabriel (Doppler dele, projeto alfred-kings-ai), nunca a da Axtro."
 }

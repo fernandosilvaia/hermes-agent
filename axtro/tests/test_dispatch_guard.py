@@ -184,16 +184,28 @@ class DispatchGuardRealRepoState(unittest.TestCase):
         self.assertEqual(r["action"], "block")
         self.assertIn("enabled=false", r["message"])
 
-    def test_real_attom_property_skill_is_governed_and_blocked_because_disabled(self):
+    def test_real_attom_property_skill_is_governed_and_allowed_when_enabled(self):
         """Prova end-to-end (GOVERNED_SKILLS.txt + contract.json reais) que a
-        skill imobiliária nova (Alfred Kings) está de fato registrada na
-        governança, não só coberta pelos próprios testes unitários dela."""
+        skill imobiliária do Alfred Kings está registrada na governança —
+        não só coberta pelos próprios testes unitários dela. Ativada
+        2026-07-26 (enabled=true, risk_class=safe) por decisão do Fernando,
+        então o caminho real hoje é "allow" com credencial presente, não
+        mais bloqueado por enabled=false."""
         cmd = ("python3 skills/real-estate/attom-property/scripts/attom_call.py "
                "--kind detail --address1 x --address2 y")
         r = dg.check(cmd, workdir=str(REPO), env={"ATTOM_API_KEY": "fake"})
         self.assertIsNotNone(r, "expected the real attom-property skill to be recognized as governed")
+        self.assertEqual(r["action"], "allow")
+
+    def test_real_attom_property_skill_blocked_without_credential(self):
+        """Mesma skill real, sem ATTOM_API_KEY no env — fail-closed (R7),
+        nunca chama a API sem credencial."""
+        cmd = ("python3 skills/real-estate/attom-property/scripts/attom_call.py "
+               "--kind detail --address1 x --address2 y")
+        r = dg.check(cmd, workdir=str(REPO), env={})
+        self.assertIsNotNone(r)
         self.assertEqual(r["action"], "block")
-        self.assertIn("enabled=false", r["message"])
+        self.assertIn("ATTOM_API_KEY", r["message"])
 
     def test_real_safe_diagnostic_example_is_allowed(self):
         cmd = "python3 axtro/skill_examples/safe-diagnostic/scripts/run.py"
