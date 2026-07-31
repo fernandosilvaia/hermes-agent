@@ -1,0 +1,35 @@
+{
+  "id": "attom_property",
+  "name": "ATTOM Property Data (Detail + Snapshot + AVM)",
+  "owner_agent": "hermes",
+  "execution_location": "both",
+  "default_model": "none",
+  "autonomy_ring": 0,
+  "tools": ["terminal", "network:attom"],
+  "credentials": ["ATTOM_API_KEY"],
+  "max_daily_cost_usd": 0,
+  "inputs": [
+    "address1 (rua) + address2 (cidade, estado, cep)",
+    "kind: detail (características completas) | snapshot (resumo) | avm (avaliação automática)"
+  ],
+  "outputs": [
+    "detail: características completas do imóvel (lote, construção, quartos, banheiros)",
+    "snapshot: resumo rápido (endereço, tipo, características básicas)",
+    "avm: avaliação automatizada com score de confiança"
+  ],
+  "stop_conditions": [
+    "leitura pura (GET), sem nenhuma ação de escrita possível nesta skill",
+    "sem address1/address2 -> erro claro, nunca chama a API com endereço vazio",
+    "status.code != 0 (SuccessWithResult) -> erro claro com o código/mensagem da ATTOM, nunca mascarado como sucesso vazio — inclui o caso comum status.code=400/'SuccessWithoutResult' (endereço válido, sem dado encontrado)"
+  ],
+  "telemetry_events": [
+    "attom_property.detail.executed",
+    "attom_property.snapshot.executed",
+    "attom_property.avm.executed",
+    "attom_property.lookup.failed"
+  ],
+  "enabled": false,
+  "production_ready": false,
+  "activation_stage": "staging",
+  "notes": "staging: dá ao Alfred Kings (cliente Gabriel Kingsbury/Ecoloop) dados de propriedade (características, resumo, avaliação automatizada) via ATTOM Data. Anel 0 (leitura pura, determinística, sem LLM, sem ação externa). ATTOM_API_KEY é a chave própria do Gabriel (Doppler dele, projeto alfred-kings-ai), nunca a da Axtro."
+}

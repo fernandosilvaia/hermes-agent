@@ -184,6 +184,17 @@ class DispatchGuardRealRepoState(unittest.TestCase):
         self.assertEqual(r["action"], "block")
         self.assertIn("enabled=false", r["message"])
 
+    def test_real_attom_property_skill_is_governed_and_blocked_because_disabled(self):
+        """Prova end-to-end (GOVERNED_SKILLS.txt + contract.json reais) que a
+        skill imobiliária nova (Alfred Kings) está de fato registrada na
+        governança, não só coberta pelos próprios testes unitários dela."""
+        cmd = ("python3 skills/real-estate/attom-property/scripts/attom_call.py "
+               "--kind detail --address1 x --address2 y")
+        r = dg.check(cmd, workdir=str(REPO), env={"ATTOM_API_KEY": "fake"})
+        self.assertIsNotNone(r, "expected the real attom-property skill to be recognized as governed")
+        self.assertEqual(r["action"], "block")
+        self.assertIn("enabled=false", r["message"])
+
     def test_real_safe_diagnostic_example_is_allowed(self):
         cmd = "python3 axtro/skill_examples/safe-diagnostic/scripts/run.py"
         r = dg.check(cmd, workdir=str(REPO), env={})

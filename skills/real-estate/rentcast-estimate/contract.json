@@ -1,0 +1,33 @@
+{
+  "id": "rentcast_estimate",
+  "name": "Rentcast Estimate (Rent + Value)",
+  "owner_agent": "hermes",
+  "execution_location": "both",
+  "default_model": "none",
+  "autonomy_ring": 0,
+  "tools": ["terminal", "network:rentcast"],
+  "credentials": ["RENTCAST_API_KEY"],
+  "max_daily_cost_usd": 0,
+  "inputs": [
+    "address (formato: 'Street, City, State, Zip') OU latitude/longitude",
+    "propertyType, bedrooms, bathrooms, squareFootage (opcionais, refinam os comparáveis)"
+  ],
+  "outputs": [
+    "rent_estimate: rent/rentRangeLow/rentRangeHigh + comparáveis",
+    "value_estimate: price/priceRangeLow/priceRangeHigh + comparáveis"
+  ],
+  "stop_conditions": [
+    "leitura pura (GET), sem nenhuma ação de escrita possível nesta skill",
+    "sem address nem lat/lng -> erro claro, nunca chama a API com endereço vazio",
+    "API devolve erro (ex.: propriedade não encontrada, fora de cobertura) -> repassa o erro claro, nunca inventa estimativa"
+  ],
+  "telemetry_events": [
+    "rentcast_estimate.rent.executed",
+    "rentcast_estimate.value.executed",
+    "rentcast_estimate.lookup.failed"
+  ],
+  "enabled": false,
+  "production_ready": false,
+  "activation_stage": "staging",
+  "notes": "staging: dá ao Alfred Kings (cliente Gabriel Kingsbury/Ecoloop) estimativa de aluguel e de valor de mercado por endereço, via Rentcast (140M+ registros de propriedade nos EUA). Anel 0 (leitura pura, determinística, sem LLM, sem ação externa). RENTCAST_API_KEY é a chave própria do Gabriel (Doppler dele, projeto alfred-kings-ai), nunca a da Axtro."
+}
