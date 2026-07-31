@@ -1,0 +1,34 @@
+{
+  "id": "rentcast_estimate",
+  "name": "Rentcast Estimate (Rent + Value)",
+  "owner_agent": "hermes",
+  "execution_location": "both",
+  "default_model": "none",
+  "autonomy_ring": 0,
+  "risk_class": "safe",
+  "tools": ["terminal", "network:rentcast"],
+  "credentials": ["RENTCAST_API_KEY"],
+  "max_daily_cost_usd": 0,
+  "inputs": [
+    "address (formato: 'Street, City, State, Zip') OU latitude/longitude",
+    "propertyType, bedrooms, bathrooms, squareFootage (opcionais, refinam os comparáveis)"
+  ],
+  "outputs": [
+    "rent_estimate: rent/rentRangeLow/rentRangeHigh + comparáveis",
+    "value_estimate: price/priceRangeLow/priceRangeHigh + comparáveis"
+  ],
+  "stop_conditions": [
+    "leitura pura (GET), sem nenhuma ação de escrita possível nesta skill",
+    "sem address nem lat/lng -> erro claro, nunca chama a API com endereço vazio",
+    "API devolve erro (ex.: propriedade não encontrada, fora de cobertura) -> repassa o erro claro, nunca inventa estimativa"
+  ],
+  "telemetry_events": [
+    "rentcast_estimate.rent.executed",
+    "rentcast_estimate.value.executed",
+    "rentcast_estimate.lookup.failed"
+  ],
+  "enabled": true,
+  "production_ready": true,
+  "activation_stage": "production",
+  "notes": "ATIVADA 2026-07-26 por decisão explícita do Fernando (\"ativa as 3 skills\") — gate humano registrado aqui. production_ready=true e activation_stage=production exigidos junto de enabled=true (invariante I1 do validate_contracts.py); maturidade real por trás disso: 23 testes automatizados (HTTP mockado) + 1 teste de reconhecimento real pelo dispatch_guard, sem checklist/revisão adversarial formal separada além disso. dá ao Alfred Kings (cliente Gabriel Kingsbury/Ecoloop) estimativa de aluguel e de valor de mercado por endereço, via Rentcast (140M+ registros de propriedade nos EUA). Anel 0 (leitura pura, determinística, sem LLM, sem ação externa). RENTCAST_API_KEY é a chave própria do Gabriel (Doppler dele, projeto alfred-kings-ai), nunca a da Axtro."
+}
