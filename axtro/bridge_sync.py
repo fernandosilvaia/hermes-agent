@@ -47,7 +47,7 @@ for _p in (str(_REPO_ROOT), str(_AXTRO_DIR)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from hermes_cli.profiles import create_profile, get_profile_dir, normalize_profile_name, profile_exists
+from hermes_cli.profiles import create_profile, get_profile_dir, normalize_profile_name, profile_exists, validate_profile_name
 from tenant_skill_catalog import eligible_skills_for_connectors
 
 logger = logging.getLogger(__name__)
@@ -112,6 +112,44 @@ def get_connector_credential(company_id: str, connector_key: str, *, config: Opt
     resp.raise_for_status()
     value = resp.json()
     return value if value else None
+
+
+def list_active_companies(*, config: Optional[Dict[str, str]] = None, exclude_company_ids: Optional[set] = None) -> List[str]:
+    """Descobre empresas com o conector ``telegram`` CONECTADO — a única
+    credencial que esta versão do bridge_sync materializa (ver docstring do
+    módulo). Consulta direta em ``agent_connectors`` (service-role), não a
+    RPC de leitura de segredo — aqui só precisamos do ``company_id``, nunca
+    do valor da credencial.
+
+    Substitui a necessidade de listar ``--company-id`` na mão a cada empresa
+    nova que assina o Axtro Agent (Fase 8 do plano) — é o que torna o
+    watch-loop de produção (``watch_poll_discover``) capaz de pegar uma
+    empresa nova sozinho, sem reiniciar o processo nem editar config.
+
+    ``exclude_company_ids``: defesa em profundidade — nunca materializa um
+    ``company_id`` conhecido de cliente com daemon dedicado (Alfred Kings,
+    Techmax/Luiza), mesmo que uma linha para ele apareça nesta tabela um dia
+    por engano. Em 2026-07-31, nenhum dos dois existe em ``companies`` neste
+    Supabase (confirmado por consulta direta) — a exclusão é puramente
+    preventiva, não corrige um problema observado.
+    """
+    cfg = config or _bridge_config()
+    url = f"{cfg['supabase_url']}/rest/v1/agent_connectors"
+    resp = httpx.get(
+        url,
+        headers={"apikey": cfg["service_role_key"], "Authorization": f"Bearer {cfg['service_role_key']}"},
+        params={"select": "company_id", "connector_key": "eq.telegram", "status": "eq.connected"},
+        timeout=20,
+    )
+    resp.raise_for_status()
+    excluded = exclude_company_ids or set()
+    seen: List[str] = []
+    for row in resp.json():
+        cid = row["company_id"]
+        if cid in excluded or cid in seen:
+            continue
+        seen.append(cid)
+    return seen
 
 
 def _read_usage_snapshot(company_id: str, *, config: Dict[str, str]) -> Dict[str, float]:
@@ -314,6 +352,24 @@ def materialize_profile(snapshot: Dict[str, Any], *, config: Optional[Dict[str, 
             f"empresa {company_id} normalizou pro nome de perfil reservado "
             "'default' — nunca materializar sobre o perfil pessoal."
         )
+    # CRÍTICO: valida o FORMATO do slug (regex [a-z0-9][a-z0-9_-]{0,63} +
+    # nomes reservados) ANTES de qualquer profile_exists()/get_profile_dir().
+    # `company.slug`/`company.name` vêm de uma tabela que uma empresa
+    # autenticada escreve direto (a RLS da Supabase não impõe formato —
+    # `slugify()` do Next.js é só uma camada de UX, não a fronteira de
+    # segurança) — sem esta validação aqui, um slug tipo '/tmp' ou
+    # '../profiles/outro-tenant' faz profile_exists() retornar True (o
+    # caminho já existe) e PULA create_profile(), o único lugar que hoje
+    # rodava validate_profile_name() — resultado: escreve SOUL.md/.env com
+    # a credencial da empresa/.skills_allowlist diretamente num diretório
+    # real do sistema ou no perfil já materializado de outro tenant.
+    # Achado por revisão adversarial (2026-07-31) antes de qualquer deploy.
+    try:
+        validate_profile_name(slug)
+    except ValueError as exc:
+        raise BridgeError(
+            f"empresa {company_id}: slug/nome inseguro pra virar perfil ({slug!r}) — recusado antes de tocar o filesystem ({exc})"
+        ) from exc
 
     if not profile_exists(slug):
         # NUNCA no_skills=True aqui: essa flag grava um marcador PERMANENTE
@@ -389,17 +445,77 @@ def watch_poll(company_ids: List[str], *, interval_seconds: int = 15, iterations
             time.sleep(interval_seconds)
 
 
+def watch_poll_discover(
+    *,
+    interval_seconds: int = 15,
+    iterations: Optional[int] = None,
+    exclude_company_ids: Optional[set] = None,
+) -> None:
+    """Como ``watch_poll``, mas descobre as empresas ativas a cada ciclo via
+    ``list_active_companies`` em vez de receber uma lista fixa — o modo usado
+    em produção (Fase 8): uma empresa nova que conecta o Telegram dela no
+    painel entra no loop sozinha, sem precisar reiniciar o processo nem
+    editar nenhuma lista na mão. ``iterations=None`` roda pra sempre; um
+    inteiro é usado só em teste."""
+    cfg = _bridge_config()
+    last_hash: Dict[str, str] = {}
+    n = 0
+    while iterations is None or n < iterations:
+        try:
+            company_ids = list_active_companies(config=cfg, exclude_company_ids=exclude_company_ids)
+        except Exception:
+            logger.exception("falha ao descobrir empresas ativas — tenta de novo no próximo poll")
+            company_ids = []
+        for company_id in company_ids:
+            try:
+                snapshot = snapshot_company(company_id, config=cfg)
+                digest = hashlib.sha256(json.dumps(snapshot, sort_keys=True).encode("utf-8")).hexdigest()
+                if last_hash.get(company_id) != digest:
+                    materialize_profile(snapshot, config=cfg)
+                    last_hash[company_id] = digest
+            except Exception:
+                logger.exception("falha ao sincronizar empresa %s — tenta de novo no próximo poll", company_id)
+        n += 1
+        if iterations is None or n < iterations:
+            time.sleep(interval_seconds)
+
+
+def run_forever_in_background(*, interval_seconds: int = 15, exclude_company_ids: Optional[set] = None) -> None:
+    """Ponto de entrada pensado pro gateway (chamado via ``asyncio.to_thread``
+    dentro de um ``asyncio.create_task``), não pro CLI. ``watch_poll_discover``
+    já isola falha por empresa e por ciclo de descoberta internamente; esta
+    camada extra garante que mesmo uma exceção totalmente inesperada (fora
+    desses try/except internos) nunca mata a sincronização multi-tenant pro
+    resto da vida do processo do gateway — loga e tenta de novo com backoff
+    fixo em vez de deixar a task morrer silenciosamente."""
+    while True:
+        try:
+            watch_poll_discover(interval_seconds=interval_seconds, exclude_company_ids=exclude_company_ids)
+            return  # só retorna se iterations tiver sido passado (nunca é o caso aqui)
+        except Exception:
+            logger.exception(
+                "watch_poll_discover encerrou inesperadamente — reiniciando em %ss", interval_seconds
+            )
+            time.sleep(interval_seconds)
+
+
 def _main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description="Materializador da ponte HERMES_BRIDGE.md")
     parser.add_argument("--once", action="store_true", help="materializa uma vez e sai")
-    parser.add_argument("--watch", action="store_true", help="poll contínuo (v1 — não é Realtime)")
+    parser.add_argument("--watch", action="store_true", help="poll contínuo de uma lista fixa de --company-id (v1 — não é Realtime)")
+    parser.add_argument("--watch-all", action="store_true", help="poll contínuo com descoberta automática de empresas ativas (produção, Fase 8)")
     parser.add_argument("--company-id", action="append", dest="company_ids", default=[])
+    parser.add_argument("--exclude-company-id", action="append", dest="exclude_company_ids", default=[])
     parser.add_argument("--interval", type=int, default=15)
     args = parser.parse_args()
 
+    if args.watch_all:
+        watch_poll_discover(interval_seconds=args.interval, exclude_company_ids=set(args.exclude_company_ids))
+        return 0
+
     if not args.company_ids:
-        parser.error("--company-id é obrigatório (pode repetir pra mais de uma empresa)")
+        parser.error("--company-id é obrigatório (pode repetir pra mais de uma empresa) — ou use --watch-all")
 
     if args.once:
         for cid in args.company_ids:
@@ -409,7 +525,7 @@ def _main() -> int:
     if args.watch:
         watch_poll(args.company_ids, interval_seconds=args.interval)
         return 0
-    parser.error("passe --once ou --watch")
+    parser.error("passe --once, --watch ou --watch-all")
     return 2
 
 

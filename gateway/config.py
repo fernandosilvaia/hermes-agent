@@ -706,6 +706,11 @@ class GatewayConfig:
             # Also honor gateway.multiplex_profiles written by
             # ``hermes config set gateway.multiplex_profiles true``.
             multiplex_profiles = nested_gateway.get("multiplex_profiles")
+        if multiplex_profiles is None and "HERMES_MULTIPLEX_PROFILES" in os.environ:
+            # Env var escape hatch for containerized deploys (e.g. Railway)
+            # where writing to config.yaml on the volume before first boot
+            # isn't convenient. config.yaml still wins if it's ever set.
+            multiplex_profiles = os.environ["HERMES_MULTIPLEX_PROFILES"]
         if "max_concurrent_sessions" in data:
             max_concurrent_raw = data.get("max_concurrent_sessions")
             max_concurrent_key = "max_concurrent_sessions"

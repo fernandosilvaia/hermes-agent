@@ -127,6 +127,21 @@ class TestMultiplexConfigFlag:
         cfg = GatewayConfig.from_dict(GatewayConfig(multiplex_profiles=True).to_dict())
         assert cfg.multiplex_profiles is True
 
+    def test_env_var_enables_when_file_silent(self, monkeypatch):
+        monkeypatch.setenv("HERMES_MULTIPLEX_PROFILES", "true")
+        cfg = GatewayConfig.from_dict({})
+        assert cfg.multiplex_profiles is True
+
+    def test_env_var_ignored_when_file_explicitly_sets_it(self, monkeypatch):
+        monkeypatch.setenv("HERMES_MULTIPLEX_PROFILES", "true")
+        cfg = GatewayConfig.from_dict({"multiplex_profiles": False})
+        assert cfg.multiplex_profiles is False
+
+    def test_env_var_absent_keeps_default_false(self, monkeypatch):
+        monkeypatch.delenv("HERMES_MULTIPLEX_PROFILES", raising=False)
+        cfg = GatewayConfig.from_dict({})
+        assert cfg.multiplex_profiles is False
+
 
 class TestSessionStoreProfileResolution:
     """SessionStore._generate_session_key honors the flag: legacy namespace
