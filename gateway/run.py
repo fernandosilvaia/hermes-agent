@@ -5936,6 +5936,49 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # idle case where the subagent finishes with no agent turn running.
         asyncio.create_task(self._async_delegation_watcher())
 
+        # Start the Axtro multi-tenant bridge (Fase 8) — background sync that
+        # discovers Axtro Agent companies with Telegram connected (Supabase)
+        # and materializes/updates a local hermes profile for each, so a new
+        # signup gets a working agent without anyone restarting this process.
+        # Double-gated on purpose: multiplex_profiles=true AND
+        # AXTRO_BRIDGE_ENABLED=true must both hold, so this never activates on
+        # a single-tenant dedicated client daemon (Alfred Kings, Techmax/Luiza)
+        # that simply doesn't set the env var.
+        if getattr(self.config, "multiplex_profiles", False) and os.environ.get("AXTRO_BRIDGE_ENABLED", "").strip().lower() in ("1", "true", "yes"):
+            try:
+                from axtro import bridge_sync as _axtro_bridge_sync
+                # Defense-in-depth: company_ids that must NEVER be auto-materialized
+                # here even if a row for them ever appears in this Supabase project
+                # (e.g. Alfred Kings, Techmax/Luiza — dedicated single-tenant
+                # daemons that must keep being deployed/managed by hand). Real lever
+                # for ops, not just documentation — comma-separated company_id list.
+                _bridge_exclude_ids = {
+                    _cid.strip()
+                    for _cid in os.environ.get("AXTRO_BRIDGE_EXCLUDE_COMPANY_IDS", "").split(",")
+                    if _cid.strip()
+                }
+                # Plain daemon thread — deliberately NOT asyncio.to_thread()/
+                # run_in_executor(). run_forever_in_background() never returns,
+                # and asyncio.run()'s own teardown (loop.shutdown_default_executor())
+                # blocks forever joining every worker the default executor ever
+                # created; a to_thread() task that never returns hangs every
+                # graceful shutdown/restart until an external SIGKILL, and
+                # permanently pins one slot of the pool shared by every other
+                # blocking gateway call (audio probing, MCP discovery, etc).
+                # A daemon=True thread is invisible to asyncio's executor
+                # teardown (Python kills daemon threads automatically at process
+                # exit) and has its own dedicated OS thread. Found + fixed by
+                # adversarial review (2026-07-31) before any production deploy.
+                threading.Thread(
+                    target=_axtro_bridge_sync.run_forever_in_background,
+                    kwargs={"exclude_company_ids": _bridge_exclude_ids or None},
+                    name="axtro-bridge-sync",
+                    daemon=True,
+                ).start()
+                logger.info("Axtro bridge_sync (multi-tenant) started in background.")
+            except Exception:
+                logger.exception("Failed to start axtro.bridge_sync — gateway continues without multi-tenant sync")
+
         logger.info("Press Ctrl+C to stop")
         
         return True
