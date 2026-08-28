@@ -208,6 +208,7 @@ gateway:
     header_default:        "✨ Session réinitialisée ! Nouveau départ."
     header_new:            "✨ Nouvelle session démarrée !"
     header_titled:         "✨ Nouvelle session démarrée : {title}"
+    header_topic:          "Nouvelle session démarrée dans ce topic.\n\nAstuce : pour un travail parallèle, ouvrez All Messages et envoyez-y un message pour créer un topic distinct au lieu d'utiliser /new ici. /new remplace la session associée au topic actuel."
     title_rejected:        "\n⚠️ Titre refusé : {error}"
     title_error_untitled:  "\n⚠️ {error} — session démarrée sans titre."
     title_empty_untitled:  "\n⚠️ Le titre est vide après nettoyage — session démarrée sans titre."

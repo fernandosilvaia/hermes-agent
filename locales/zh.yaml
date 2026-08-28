@@ -208,6 +208,7 @@ gateway:
     header_default:        "✨ 会话已重置！重新开始。"
     header_new:            "✨ 新会话已启动！"
     header_titled:         "✨ 新会话已启动：{title}"
+    header_topic:          "已在此 topic 中开始新的会话。\n\n提示：如需并行工作，请打开 All Messages 并在其中发送消息以创建一个独立的 topic，而不要在这里使用 /new。/new 会替换当前 topic 关联的会话。"
     title_rejected:        "\n⚠️ 标题被拒绝：{error}"
     title_error_untitled:  "\n⚠️ {error} — 会话以未命名方式启动。"
     title_empty_untitled:  "\n⚠️ 清理后标题为空 — 会话以未命名方式启动。"

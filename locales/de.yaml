@@ -208,6 +208,7 @@ gateway:
     header_default:        "✨ Sitzung zurückgesetzt! Neuanfang."
     header_new:            "✨ Neue Sitzung gestartet!"
     header_titled:         "✨ Neue Sitzung gestartet: {title}"
+    header_topic:          "Neue Sitzung in diesem Topic gestartet.\n\nTipp: Für parallele Arbeit öffnen Sie All Messages und senden Sie dort eine Nachricht, um ein separates Topic zu erstellen, anstatt hier /new zu verwenden. /new ersetzt die Sitzung, die mit dem aktuellen Topic verknüpft ist."
     title_rejected:        "\n⚠️ Titel abgelehnt: {error}"
     title_error_untitled:  "\n⚠️ {error} — Sitzung ohne Titel gestartet."
     title_empty_untitled:  "\n⚠️ Titel ist nach Bereinigung leer — Sitzung ohne Titel gestartet."

@@ -208,6 +208,7 @@ gateway:
     header_default:        "✨ 세션이 초기화되었습니다! 새로 시작합니다."
     header_new:            "✨ 새 세션이 시작되었습니다!"
     header_titled:         "✨ 새 세션이 시작되었습니다: {title}"
+    header_topic:          "이 토픽에서 새 세션을 시작했습니다.\n\n팁: 병렬 작업을 위해서는 여기서 /new를 사용하는 대신 All Messages를 열고 메시지를 보내 별도의 토픽을 만드세요. /new는 현재 토픽에 연결된 세션을 교체합니다."
     title_rejected:        "\n⚠️ 제목이 거부되었습니다: {error}"
     title_error_untitled:  "\n⚠️ {error} — 제목 없이 세션을 시작했습니다."
     title_empty_untitled:  "\n⚠️ 정리 후 제목이 비어 있습니다 — 제목 없이 세션을 시작했습니다."

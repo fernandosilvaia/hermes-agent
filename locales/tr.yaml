@@ -208,6 +208,7 @@ gateway:
     header_default:        "✨ Oturum sıfırlandı! Yeniden başlıyoruz."
     header_new:            "✨ Yeni oturum başlatıldı!"
     header_titled:         "✨ Yeni oturum başlatıldı: {title}"
+    header_topic:          "Bu topic'te yeni bir oturum başlatıldı.\n\nİpucu: paralel çalışma için burada /new kullanmak yerine All Messages'ı açıp orada bir mesaj göndererek ayrı bir topic oluşturun. /new, mevcut topic'e bağlı oturumu değiştirir."
     title_rejected:        "\n⚠️ Başlık reddedildi: {error}"
     title_error_untitled:  "\n⚠️ {error} — oturum başlıksız başlatıldı."
     title_empty_untitled:  "\n⚠️ Temizlik sonrası başlık boş — oturum başlıksız başlatıldı."

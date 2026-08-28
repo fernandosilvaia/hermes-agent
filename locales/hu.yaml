@@ -208,6 +208,7 @@ gateway:
     header_default:        "✨ Munkamenet visszaállítva! Kezdjük tiszta lappal."
     header_new:            "✨ Új munkamenet elindítva!"
     header_titled:         "✨ Új munkamenet elindítva: {title}"
+    header_topic:          "Új munkamenet indult ebben a topicban.\n\nTipp: párhuzamos munkához nyisd meg az All Messagest, és küldj oda egy üzenetet egy külön topic létrehozásához, ahelyett hogy itt a /new parancsot használnád. A /new lecseréli a jelenlegi topichoz kapcsolt munkamenetet."
     title_rejected:        "\n⚠️ Cím elutasítva: {error}"
     title_error_untitled:  "\n⚠️ {error} — a munkamenet cím nélkül indult."
     title_empty_untitled:  "\n⚠️ Tisztítás után a cím üres — a munkamenet cím nélkül indult."
