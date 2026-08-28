@@ -403,6 +403,84 @@ class TestSyncSkills:
         assert result["copied"] == []
         assert sorted(result["denied_by_allowlist"]) == ["new-skill", "old-skill"]
 
+    def _setup_bundled_two_categories(self, tmp_path):
+        """Two categories, each with one skill and its own DESCRIPTION.md —
+        used to prove DESCRIPTION.md seeding follows the allowlist per
+        category instead of copying every DESCRIPTION.md unconditionally."""
+        bundled = tmp_path / "bundled_skills"
+        (bundled / "kept-category" / "kept-skill").mkdir(parents=True)
+        (bundled / "kept-category" / "kept-skill" / "SKILL.md").write_text("# Kept")
+        (bundled / "kept-category" / "DESCRIPTION.md").write_text("Kept category desc")
+        (bundled / "dropped-category" / "dropped-skill").mkdir(parents=True)
+        (bundled / "dropped-category" / "dropped-skill" / "SKILL.md").write_text("# Dropped")
+        (bundled / "dropped-category" / "DESCRIPTION.md").write_text("Dropped category desc")
+        return bundled
+
+    def test_allowlist_absent_seeds_all_description_md(self, tmp_path):
+        """No .skills_allowlist file → every category's DESCRIPTION.md is
+        still seeded, old behavior preserved for single-tenant deployments."""
+        bundled = self._setup_bundled_two_categories(tmp_path)
+        skills_dir = tmp_path / "user_skills"
+        manifest_file = skills_dir / ".bundled_manifest"
+        allowlist_file = skills_dir / ".skills_allowlist"  # never created
+
+        with self._patches(bundled, skills_dir, manifest_file), \
+                patch("tools.skills_sync.SKILLS_ALLOWLIST_FILE", allowlist_file):
+            sync_skills(quiet=True)
+
+        assert (skills_dir / "kept-category" / "DESCRIPTION.md").exists()
+        assert (skills_dir / "dropped-category" / "DESCRIPTION.md").exists()
+
+    def test_allowlist_blocks_description_md_of_denied_category(self, tmp_path):
+        """A category whose only skill is denied by the allowlist must not
+        have its DESCRIPTION.md seeded either — otherwise the operator's
+        category catalog (name + blurb) leaks to the tenant even though the
+        skill itself was correctly withheld."""
+        bundled = self._setup_bundled_two_categories(tmp_path)
+        skills_dir = tmp_path / "user_skills"
+        manifest_file = skills_dir / ".bundled_manifest"
+        allowlist_file = skills_dir / ".skills_allowlist"
+        skills_dir.mkdir(parents=True)
+        allowlist_file.write_text("kept-skill\n")
+
+        with self._patches(bundled, skills_dir, manifest_file), \
+                patch("tools.skills_sync.SKILLS_ALLOWLIST_FILE", allowlist_file):
+            result = sync_skills(quiet=True)
+
+        assert result["denied_by_allowlist"] == ["dropped-skill"]
+        assert (skills_dir / "kept-category" / "DESCRIPTION.md").exists()
+        assert not (skills_dir / "dropped-category" / "DESCRIPTION.md").exists()
+        assert not (skills_dir / "dropped-category").exists()
+
+    def test_allowlist_keeps_description_md_for_category_with_allowed_subcategory_skill(self, tmp_path):
+        """A parent category's DESCRIPTION.md must still be seeded when the
+        only allowed skill lives in a nested subcategory (e.g. only
+        `mlops/inference/some-skill` is allowed but `mlops/DESCRIPTION.md`
+        and `mlops/inference/DESCRIPTION.md` should both survive)."""
+        bundled = tmp_path / "bundled_skills"
+        (bundled / "parent-cat" / "sub-cat" / "nested-skill").mkdir(parents=True)
+        (bundled / "parent-cat" / "sub-cat" / "nested-skill" / "SKILL.md").write_text("# Nested")
+        (bundled / "parent-cat" / "DESCRIPTION.md").write_text("Parent category desc")
+        (bundled / "parent-cat" / "sub-cat" / "DESCRIPTION.md").write_text("Sub category desc")
+        (bundled / "other-cat" / "other-skill").mkdir(parents=True)
+        (bundled / "other-cat" / "other-skill" / "SKILL.md").write_text("# Other")
+        (bundled / "other-cat" / "DESCRIPTION.md").write_text("Other category desc")
+
+        skills_dir = tmp_path / "user_skills"
+        manifest_file = skills_dir / ".bundled_manifest"
+        allowlist_file = skills_dir / ".skills_allowlist"
+        skills_dir.mkdir(parents=True)
+        allowlist_file.write_text("nested-skill\n")
+
+        with self._patches(bundled, skills_dir, manifest_file), \
+                patch("tools.skills_sync.SKILLS_ALLOWLIST_FILE", allowlist_file):
+            result = sync_skills(quiet=True)
+
+        assert result["denied_by_allowlist"] == ["other-skill"]
+        assert (skills_dir / "parent-cat" / "DESCRIPTION.md").exists()
+        assert (skills_dir / "parent-cat" / "sub-cat" / "DESCRIPTION.md").exists()
+        assert not (skills_dir / "other-cat" / "DESCRIPTION.md").exists()
+
     def test_fresh_install_copies_all(self, tmp_path):
         bundled = self._setup_bundled(tmp_path)
         skills_dir = tmp_path / "user_skills"
