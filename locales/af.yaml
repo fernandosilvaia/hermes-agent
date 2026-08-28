@@ -208,6 +208,7 @@ gateway:
     header_default:        "✨ Sessie herstel! Begin van voor."
     header_new:            "✨ Nuwe sessie begin!"
     header_titled:         "✨ Nuwe sessie begin: {title}"
+    header_topic:          "Nuwe sessie in hierdie onderwerp begin.\n\nWenk: vir parallelle werk, open All Messages en stuur 'n boodskap daar om 'n aparte onderwerp te skep in plaas daarvan om /new hier te gebruik. /new vervang die sessie wat aan die huidige onderwerp gekoppel is."
     title_rejected:        "\n⚠️ Titel verwerp: {error}"
     title_error_untitled:  "\n⚠️ {error} — sessie sonder titel begin."
     title_empty_untitled:  "\n⚠️ Titel is leeg na opruiming — sessie sonder titel begin."

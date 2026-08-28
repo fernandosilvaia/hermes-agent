@@ -212,6 +212,7 @@ gateway:
     header_default:        "✨ Seisiún athshocraithe! Ag tosú as an nua."
     header_new:            "✨ Seisiún nua tosaithe!"
     header_titled:         "✨ Seisiún nua tosaithe: {title}"
+    header_topic:          "Tosaíodh seisiún nua sa topaic seo.\n\nLeid: le haghaidh oibre comhthreomhaire, oscail All Messages agus seol teachtaireacht ann chun topaic ar leith a chruthú in ionad /new a úsáid anseo. Athsholáthraíonn /new an seisiún atá ceangailte leis an topaic reatha."
     title_rejected:        "\n⚠️ Teideal diúltaithe: {error}"
     title_error_untitled:  "\n⚠️ {error} — seisiún tosaithe gan teideal."
     title_empty_untitled:  "\n⚠️ Tá an teideal folamh tar éis glanta — seisiún tosaithe gan teideal."

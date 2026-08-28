@@ -208,6 +208,7 @@ gateway:
     header_default:        "✨ 工作階段已重設！重新開始。"
     header_new:            "✨ 新工作階段已啟動！"
     header_titled:         "✨ 新工作階段已啟動：{title}"
+    header_topic:          "已在此 topic 中開始新的工作階段。\n\n提示：如需平行作業，請開啟 All Messages 並在其中傳送訊息以建立另一個獨立的 topic，而不要在這裡使用 /new。/new 會取代目前 topic 所連結的工作階段。"
     title_rejected:        "\n⚠️ 標題遭拒絕：{error}"
     title_error_untitled:  "\n⚠️ {error} — 工作階段以未命名方式啟動。"
     title_empty_untitled:  "\n⚠️ 清理後標題為空 — 工作階段以未命名方式啟動。"

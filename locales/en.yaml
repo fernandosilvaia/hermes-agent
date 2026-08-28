@@ -223,6 +223,7 @@ gateway:
     header_default:        "✨ Session reset! Starting fresh."
     header_new:            "✨ New session started!"
     header_titled:         "✨ New session started: {title}"
+    header_topic:          "Started a new session in this topic.\n\nTip: for parallel work, open All Messages and send a message there to create a separate topic instead of using /new here. /new replaces the session attached to the current topic."
     title_rejected:        "\n⚠️ Title rejected: {error}"
     title_error_untitled:  "\n⚠️ {error} — session started untitled."
     title_empty_untitled:  "\n⚠️ Title is empty after cleanup — session started untitled."

@@ -208,6 +208,7 @@ gateway:
     header_default:        "✨ Sessão reiniciada! A começar do zero."
     header_new:            "✨ Nova sessão iniciada!"
     header_titled:         "✨ Nova sessão iniciada: {title}"
+    header_topic:          "Nova sessão iniciada neste topic.\n\nDica: para trabalho paralelo, abre All Messages e envia uma mensagem aí para criar um topic separado em vez de usar /new aqui. O /new substitui a sessão associada ao topic atual."
     title_rejected:        "\n⚠️ Título rejeitado: {error}"
     title_error_untitled:  "\n⚠️ {error} — sessão iniciada sem título."
     title_empty_untitled:  "\n⚠️ O título fica vazio após a limpeza — sessão iniciada sem título."
