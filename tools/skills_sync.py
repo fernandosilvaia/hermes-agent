@@ -703,9 +703,35 @@ def sync_skills(quiet: bool = False) -> dict:
     for name in cleaned:
         del manifest[name]
 
+    # A category's DESCRIPTION.md is metadata *about* the skills inside it
+    # (name + blurb of every skill in the category), not a skill on its own —
+    # so it must respect the same allowlist filter as the skills loop above,
+    # otherwise a denied category's catalog entry leaks to the tenant even
+    # though every skill inside it was correctly denied (the bug this comment
+    # replaces: the old `rglob("DESCRIPTION.md")` loop below ignored the
+    # allowlist entirely). Reuses `bundled_skills`, which is already filtered
+    # down to allowed skills above — no separate allowlist read needed. A
+    # category (or subcategory) stays eligible if it still has at least one
+    # allowed skill anywhere under it, so e.g. `mlops/DESCRIPTION.md` is kept
+    # when only `mlops/inference/some-skill` is allowed.
+    allowed_category_dirs: Optional[set] = None
+    if allowlist is not None:
+        allowed_category_dirs = set()
+        for _, skill_src in bundled_skills:
+            rel_parts = skill_src.relative_to(bundled_dir).parts
+            for i in range(1, len(rel_parts) + 1):
+                allowed_category_dirs.add(Path(*rel_parts[:i]))
+
     # Also copy DESCRIPTION.md files for categories (if not already present)
     for desc_md in bundled_dir.rglob("DESCRIPTION.md"):
         rel = desc_md.relative_to(bundled_dir)
+        category_dir = rel.parent
+        if (
+            allowed_category_dirs is not None
+            and category_dir != Path(".")
+            and category_dir not in allowed_category_dirs
+        ):
+            continue
         dest_desc = SKILLS_DIR / rel
         if not dest_desc.exists():
             try:
