@@ -35,6 +35,7 @@ import json
 import logging
 import os
 import re
+import stat
 from typing import Any, Dict, Optional
 
 
@@ -371,6 +372,41 @@ class WhatsAppBehaviorMixin:
 # Shared bridge directory resolution for CLI and adapter
 # ---------------------------------------------------------------------------
 
+def _ensure_tree_writable(root: Path, *, skip_node_modules: bool) -> None:
+    """Add the owner write bit across ``root`` so ``npm install`` can run there.
+
+    The Docker image seals the install tree with ``chmod -R a-w /opt/hermes``
+    (555), and ``shutil.copytree`` copies the source mode verbatim — so a
+    mirror made from it is born read-only and ``npm install`` dies with
+    ``EACCES: permission denied, mkdir '.../node_modules'``, which is the
+    exact failure the mirror exists to prevent.
+
+    ``skip_node_modules`` trades completeness for startup cost. On a mirror we
+    just copied, walking everything is free relative to the copy itself. On a
+    mirror that already exists, ``node_modules`` was created by npm under its
+    own umask (already writable), and re-walking Baileys' dependency tree on
+    every gateway start would cost tens of thousands of syscalls for nothing.
+
+    Best effort: a chmod we are not allowed to make is logged, not raised, so
+    resolution still returns a usable path.
+    """
+
+    def _add_write_bit(path: str) -> None:
+        try:
+            mode = os.stat(path).st_mode
+            if not mode & stat.S_IWUSR:
+                os.chmod(path, mode | stat.S_IWUSR)
+        except OSError as exc:
+            logger.warning("Could not make %s writable: %s", path, exc)
+
+    _add_write_bit(str(root))
+    for dirpath, dirnames, filenames in os.walk(str(root)):
+        if skip_node_modules:
+            dirnames[:] = [d for d in dirnames if d != "node_modules"]
+        for name in dirnames + filenames:
+            _add_write_bit(os.path.join(dirpath, name))
+
+
 def resolve_whatsapp_bridge_dir() -> Path:
     """Resolve the WhatsApp bridge directory, mirroring to HERMES_HOME if needed.
 
@@ -405,6 +441,9 @@ def resolve_whatsapp_bridge_dir() -> Path:
 
     # Install dir is read-only, mirror to HERMES_HOME if needed
     if hermes_home_bridge.exists():
+        # Heal mirrors left read-only by earlier versions of this function,
+        # which copied the 555 source mode straight through.
+        _ensure_tree_writable(hermes_home_bridge, skip_node_modules=True)
         return hermes_home_bridge
 
     # Mirror the bridge source to HERMES_HOME
@@ -415,6 +454,10 @@ def resolve_whatsapp_bridge_dir() -> Path:
             hermes_home_bridge,
             dirs_exist_ok=False,
         )
+        # copytree preserved the source mode, so the fresh mirror is as
+        # read-only as the install tree it came from. Make it writable before
+        # any caller runs npm install in it.
+        _ensure_tree_writable(hermes_home_bridge, skip_node_modules=False)
         return hermes_home_bridge
     except Exception:
         return install_bridge
