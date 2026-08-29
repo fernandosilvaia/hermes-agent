@@ -69,6 +69,33 @@ from _send_policy import (  # noqa: E402
 TELNYX_CALLS_API = "https://api.telnyx.com/v2/calls"
 DEFAULT_FROM = os.environ.get("TELNYX_NUMBER", "+16174505166")
 
+# ── Prefixo OBRIGATORIO de identificacao de IA ─────────────────────────────
+# Baseline legal/etico de ligacao outbound feita por IA: toda ligacao comeca
+# se identificando como assistente de IA ligando em nome do Fernando/Axtro,
+# ANTES de qualquer conteudo. Nao e opcional e nao ha flag para desligar;
+# TELNYX_AI_DISCLOSURE_TEXT so permite trocar o texto (vazio volta ao default).
+DEFAULT_AI_DISCLOSURE = (
+    "Aviso: esta e uma ligacao automatizada. Quem fala e o assistente de "
+    "inteligencia artificial da Axtro AI, ligando em nome de Fernando Silva."
+)
+
+
+def _ai_disclosure_text(env=None) -> str:
+    env = env if env is not None else os.environ
+    custom = (env.get("TELNYX_AI_DISCLOSURE_TEXT") or "").strip()
+    return custom or DEFAULT_AI_DISCLOSURE
+
+
+def apply_ai_disclosure(message, env=None) -> str:
+    """Prefixa a mensagem TTS com a identificacao de IA (idempotente)."""
+    disclosure = _ai_disclosure_text(env)
+    message = (message or "").strip()
+    if message.startswith(disclosure):
+        return message
+    if not message:
+        return disclosure
+    return disclosure + " " + message
+
 
 def _api_key(env=None) -> str:
     env = env if env is not None else os.environ
@@ -86,13 +113,24 @@ def _encode_state(message: str) -> str:
 
 
 def make_call(to: str, message: str, from_number: str = None,
-              amd: str = "premium", dry_run: bool = True, env=None) -> dict:
+              amd: str = "premium", dry_run: bool = True, env=None,
+              approved_request_id: str = None) -> dict:
     """Dispara uma ligação SÓ se o gate padrão estiver 100% aberto. Caso contrário
-    retorna o que faria (dry_run/blocked) sem discar. `amd`: 'premium' ou 'disabled'."""
+    retorna o que faria (dry_run/blocked) sem discar. `amd`: 'premium' ou 'disabled'.
+
+    `approved_request_id`: id do pedido de aprovação one-tap no Telegram que
+    autorizou esta ligação (ver request_call_approval.py). Só carimba o plano
+    para auditoria; não muda nenhuma decisão.
+
+    A mensagem TTS SEMPRE começa com o prefixo de identificação de IA
+    (apply_ai_disclosure): obrigatório, sem flag para desligar."""
     env = env if env is not None else os.environ
+    message = apply_ai_disclosure(message, env)
     plan = plan_action("make_call", to, dry_run, env=env)
     plan["from"] = from_number or (env.get("TELNYX_NUMBER") or DEFAULT_FROM)
     plan["amd"] = amd
+    if approved_request_id:
+        plan["approved_request_id"] = approved_request_id
 
     if not plan["execute"]:
         # dry-run ou bloqueado: NENHUMA chamada à Telnyx.

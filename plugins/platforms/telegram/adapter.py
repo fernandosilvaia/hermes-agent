@@ -4204,6 +4204,18 @@ class TelegramAdapter(BasePlatformAdapter):
             )
             return
 
+        # --- Telnyx call-approval callbacks (callreq:verb:request_id) ---
+        if data.startswith("callreq:"):
+            await self._handle_call_request_callback(
+                query,
+                data,
+                query_chat_id=query_chat_id,
+                query_chat_type=query_chat_type,
+                query_thread_id=query_thread_id,
+                query_user_name=query_user_name,
+            )
+            return
+
         # --- Exec approval callbacks (ea:choice:id) ---
         if data.startswith("ea:"):
             parts = data.split(":", 2)
@@ -4631,6 +4643,161 @@ class TelegramAdapter(BasePlatformAdapter):
                 await query.edit_message_text(text=appended, reply_markup=None)
         except Exception:
             pass
+
+    # ── Telnyx call-approval buttons (callreq:) ────────────────────────────
+    # One-tap approval for outbound voice calls placed by the
+    # telnyx-voice-sms skill. The skill (request_call_approval.py) creates a
+    # pending request under HERMES_HOME/telnyx_voice_sms/ and sends the owner
+    # a message with Approve/Reject inline buttons whose callback_data is
+    # "callreq:a:<request_id>" / "callreq:r:<request_id>". A tap here only
+    # RECORDS the decision (via the skill's stdlib-only
+    # decide_call_request.py, run as a subprocess like the gmail-triage
+    # buttons above); it never dials. The skill process that created the
+    # request is blocked waiting on the store and places the call through
+    # the existing make_call.py rails the moment the decision lands.
+
+    _CALLREQ_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
+
+    def _call_request_decide_script(self) -> Optional["_Path"]:
+        """Locate the skill's decide_call_request.py (env override first)."""
+        override = os.getenv("TELNYX_CALL_APPROVAL_DECIDE_SCRIPT", "").strip()
+        candidates: List[_Path] = []
+        if override:
+            candidates.append(_Path(override))
+        rel = _Path("skills") / "communication" / "telnyx-voice-sms" / "scripts" / "decide_call_request.py"
+        try:
+            from hermes_constants import get_hermes_home
+            candidates.append(get_hermes_home() / rel)
+        except Exception:
+            candidates.append(_Path.home() / ".hermes" / rel)
+        # Repo checkout (dev / CLI): plugins/platforms/telegram/adapter.py
+        # -> parents[3] is the repo root.
+        candidates.append(_Path(__file__).resolve().parents[3] / rel)
+        for candidate in candidates:
+            try:
+                if candidate.is_file():
+                    return candidate
+            except OSError:
+                continue
+        return None
+
+    async def _handle_call_request_callback(
+        self,
+        query,
+        data: str,
+        *,
+        query_chat_id,
+        query_chat_type,
+        query_thread_id,
+        query_user_name,
+    ) -> None:
+        """Handle a call-approval inline button (callreq:a|r:request_id)."""
+        parts = data.split(":", 2)
+        if len(parts) != 3 or parts[1] not in ("a", "r") \
+                or not self._CALLREQ_ID_RE.match(parts[2]):
+            await query.answer(text="Invalid call-approval data.")
+            return
+        verb, request_id = parts[1], parts[2]
+        decision = "approve" if verb == "a" else "reject"
+
+        caller_id = str(getattr(query.from_user, "id", ""))
+        if not self._is_callback_user_authorized(
+            caller_id,
+            chat_id=query_chat_id,
+            chat_type=str(query_chat_type) if query_chat_type is not None else None,
+            thread_id=str(query_thread_id) if query_thread_id is not None else None,
+            user_name=query_user_name,
+        ):
+            await query.answer(text="⛔ Voce nao esta autorizado a aprovar ligacoes.")
+            return
+
+        script_path = self._call_request_decide_script()
+        if script_path is None:
+            await query.answer(text="❌ decide_call_request.py nao encontrado")
+            logger.error("[%s] call-approval decide script missing", self.name)
+            return
+
+        user_display = getattr(query.from_user, "first_name", None) or "User"
+        cmd = [
+            sys.executable, str(script_path), request_id, decision,
+            "--decided-by", caller_id,
+            "--decided-by-name", str(user_display),
+        ]
+        result: Dict[str, Any] = {}
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                proc.communicate(), timeout=30,
+            )
+            stdout_text = stdout_bytes.decode("utf-8", errors="replace").strip()
+            if stdout_text:
+                try:
+                    result = json.loads(stdout_text.splitlines()[-1])
+                except (json.JSONDecodeError, IndexError):
+                    result = {}
+            if proc.returncode not in (0, 3) and not result:
+                stderr_text = stderr_bytes.decode("utf-8", errors="replace").strip()
+                last_line = stderr_text.splitlines()[-1] if stderr_text else f"exit {proc.returncode}"
+                await query.answer(text=f"❌ decisao falhou: {last_line[:80]}")
+                logger.error(
+                    "[%s] call-approval decide failed: id=%s decision=%s rc=%s stderr=%s",
+                    self.name, request_id, decision, proc.returncode, stderr_text,
+                )
+                return
+        except asyncio.TimeoutError:
+            await query.answer(text="❌ decisao expirou (timeout do script)")
+            logger.error(
+                "[%s] call-approval decide timed out: id=%s decision=%s",
+                self.name, request_id, decision,
+            )
+            return
+        except Exception as exc:
+            await query.answer(text=f"❌ erro: {exc}")
+            logger.error(
+                "[%s] call-approval decide exception: id=%s decision=%s err=%s",
+                self.name, request_id, decision, exc, exc_info=True,
+            )
+            return
+
+        status = result.get("status")
+        reason = result.get("reason")
+        if result.get("ok") and status == "approved":
+            answer_text = "✅ Aprovado. Vou ligar agora."
+            status_line = f"Aprovado por {user_display}. Ligando."
+        elif result.get("ok") and status == "rejected":
+            answer_text = "❌ Rejeitado. Nao vou ligar."
+            status_line = f"Rejeitado por {user_display}. Nenhuma ligacao sera feita."
+        elif reason == "expired" or status == "expired":
+            answer_text = "⌛ Este pedido expirou. Nao vou ligar."
+            status_line = "Expirado sem resposta a tempo. Nenhuma ligacao sera feita."
+        elif reason == "already_decided":
+            await query.answer(text="Este pedido ja foi resolvido.")
+            return
+        elif reason == "not_found":
+            await query.answer(text="Pedido nao encontrado (store limpo?).")
+            return
+        else:
+            await query.answer(text=f"Nada mudou ({reason or 'estado desconhecido'}).")
+            return
+
+        logger.info(
+            "[%s] call-approval %s: id=%s by user=%s",
+            self.name, status, request_id, caller_id,
+        )
+        await query.answer(text=answer_text)
+
+        # One-shot: append the outcome and strip the keyboard so the buttons
+        # cannot fire twice (the store transition is idempotent anyway).
+        original_text = (query.message.text or "") if query.message else ""
+        appended = f"{original_text}\n\n{status_line}"
+        try:
+            await query.edit_message_text(text=appended, reply_markup=None)
+        except Exception:
+            pass  # non-fatal if edit fails
 
     def _missing_media_path_error(self, label: str, path: str) -> str:
         """Build an actionable file-not-found error for gateway MEDIA delivery.
